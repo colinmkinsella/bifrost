@@ -2,6 +2,7 @@
 #include "bifrostdiffdialog.h"
 #include "bifrostdiffstore.h"
 #include "bifrostdiffview.h"
+#include "bifrostmanagedialog.h"
 #include "bifrostsidebar.h"
 #include "action.h"
 #include "uicontext.h"
@@ -43,52 +44,15 @@ extern "C"
                 }));
         Menu::mainMenu("Plugins")->addAction("Bifrost\\Run Diff...", "Bifrost");
 
-        // ── Plugins → Bifrost → View Diff… ─────────────────────────────────
-        UIAction::registerAction("Bifrost\\View Diff...");
+        // ── Plugins → Bifrost → Manage Diffs… ──────────────────────────────
+        UIAction::registerAction("Bifrost\\Manage Diffs...");
         UIActionHandler::globalActions()->bindAction(
-            "Bifrost\\View Diff...",
+            "Bifrost\\Manage Diffs...",
             UIAction(
                 [](const UIActionContext& ctx) {
-                    UIContext* uiCtx = ctx.context;
-                    if (!uiCtx) return;
-                    auto project = uiCtx->getProject();
-                    if (!project || !project->IsOpen()) return;
-
-                    auto diffs = bifrostListDiffs(project);
-                    if (diffs.empty()) return;
-
-                    QWidget* parent = uiCtx->mainWindow();
-
-                    // If only one diff, open it directly
-                    std::string chosen = diffs[0];
-                    if (diffs.size() > 1)
-                    {
-                        // Show a small picker dialog
-                        QDialog dlg(parent);
-                        dlg.setWindowTitle("Bifrost – View Diff");
-                        dlg.setMinimumWidth(300);
-                        auto* layout  = new QVBoxLayout(&dlg);
-                        auto* combo   = new QComboBox(&dlg);
-                        for (auto& name : diffs)
-                            combo->addItem(QString::fromStdString(name));
-                        auto* form = new QFormLayout();
-                        form->addRow("Diff:", combo);
-                        layout->addLayout(form);
-                        auto* buttons = new QDialogButtonBox(
-                            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-                        QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-                        QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-                        layout->addWidget(buttons);
-                        if (dlg.exec() != QDialog::Accepted) return;
-                        chosen = combo->currentText().toStdString();
-                    }
-
-                    auto diffData = bifrostLoadDiff(chosen, project);
-                    if (!diffData) return;
-
-                    QString tabTitle = QString("Diff: %1").arg(QString::fromStdString(chosen));
-                    auto* view = new BifrostDiffView(nullptr, diffData, tabTitle);
-                    uiCtx->createTabForWidget(tabTitle, view);
+                    QWidget* parent = ctx.context ? ctx.context->mainWindow() : nullptr;
+                    BifrostManageDiffsDialog dlg(parent);
+                    dlg.exec();
                 },
                 [](const UIActionContext& ctx) -> bool {
                     auto* uiCtx = ctx.context;
@@ -97,7 +61,7 @@ extern "C"
                     if (!project || !project->IsOpen()) return false;
                     return !bifrostListDiffs(project).empty();
                 }));
-        Menu::mainMenu("Plugins")->addAction("Bifrost\\View Diff...", "Bifrost");
+        Menu::mainMenu("Plugins")->addAction("Bifrost\\Manage Diffs...", "Bifrost");
 
         return true;
     }
