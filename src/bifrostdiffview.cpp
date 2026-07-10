@@ -1,4 +1,5 @@
 #include "bifrostdiffview.h"
+#include "bifrostcfgdiff.h"
 #include "bifrostdiffstore.h"
 #include "bifrostfeatures.h"
 #include "bifrostmatch.h"
@@ -148,7 +149,11 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
     m_frameSplit->addWidget(makePlaceholder(m_leftBvName));
     m_frameSplit->addWidget(makePlaceholder(m_rightBvName));
     m_frameSplit->setSizes({500, 500});
-    outerLayout->addWidget(m_frameSplit, 1);
+
+    // Stack: index 0 = linear ViewFrames, index 1 = CFG diff (created lazily).
+    m_stack = new QStackedWidget(this);
+    m_stack->addWidget(m_frameSplit);
+    outerLayout->addWidget(m_stack, 1);
 
     // Push the diff data into the singleton so the sidebar can display it.
     auto& state = BifrostPaneState::instance();
@@ -244,10 +249,34 @@ void BifrostDiffView::initPanes()
 
 void BifrostDiffView::setPaneViewType(bool graph)
 {
+    // The CFG diff needs both binaries loaded; fall back to linear otherwise.
+    if (graph && (!m_leftBv || !m_rightBv))
+    {
+        if (m_graphToggle)
+        {
+            QSignalBlocker block(m_graphToggle);
+            m_graphToggle->setChecked(false);
+        }
+        graph = false;
+    }
+
     m_graphMode = graph;
-    const QString type = graph ? "Graph" : "Linear";
-    if (m_leftFrame)  m_leftFrame->setViewType(type);
-    if (m_rightFrame) m_rightFrame->setViewType(type);
+
+    if (graph)
+    {
+        if (!m_cfgDiff)
+        {
+            m_cfgDiff = new BifrostCfgDiffView(m_stack, m_leftBv, m_rightBv);
+            m_stack->addWidget(m_cfgDiff);
+        }
+        m_cfgDiff->showPair(m_curLeftFunc, m_curRightFunc);
+        m_stack->setCurrentWidget(m_cfgDiff);
+    }
+    else
+    {
+        m_stack->setCurrentWidget(m_frameSplit);
+    }
+
     if (m_graphToggle)
     {
         QSignalBlocker block(m_graphToggle);
@@ -269,6 +298,13 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
 
     Ref<Function> lf = funcAtAddr(m_leftBv,  leftAddr);
     Ref<Function> rf = funcAtAddr(m_rightBv, rightAddr);
+
+    // Remember the pair so the Graph toggle can render the current selection,
+    // and refresh the CFG diff if it is currently showing.
+    m_curLeftFunc = lf;
+    m_curRightFunc = rf;
+    if (m_graphMode && m_cfgDiff)
+        m_cfgDiff->showPair(lf, rf);
 
     clearHighlights();
 
