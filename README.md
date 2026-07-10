@@ -46,45 +46,56 @@ The matching engine is UI-independent (no Qt) and lives in `src/`:
 
 ## Building
 
+You need a [`binaryninja-api`](https://github.com/Vector35/binaryninja-api) checkout (cloned next to this repo by default) and Qt 6.
+
 ```bash
 git clone https://github.com/colinmkinsella/bifrost
+git clone https://github.com/Vector35/binaryninja-api   # sibling directory
 cd bifrost
+
+./build.sh install     # build and symlink the plugin into Binary Ninja
+```
+
+`build.sh` detects your installed Binary Ninja build, checks out the **matching** `binaryninja-api` tag (critical — a mismatch fails the link with undefined `_BN*` symbols), configures, builds, and installs. Common invocations:
+
+```bash
+./build.sh                 # build only  -> build/out/bin/libbifrost.dylib
+./build.sh clean install   # clean rebuild + install
+./build.sh install --copy  # copy instead of symlink
+./build.sh --channel dev   # build against the api dev branch (for a dev BN)
+./build.sh --no-match-api  # build against the api checkout as-is
+./build.sh --help          # all options and env-var overrides
+```
+
+Override the auto-detected paths with the `BN_INSTALL`, `BN_API_PATH`, `CMAKE_PREFIX_PATH`, and `BN_PLUGINS_DIR` environment variables. After installing, restart Binary Ninja to load the plugin.
+
+<details>
+<summary>Manual CMake build (without the script)</summary>
+
+```bash
+# Match the api checkout to your installed BN first, e.g. for stable 5.3.9757:
+git -C ../binaryninja-api fetch --tags && git -C ../binaryninja-api checkout stable/5.3.9757
 
 cmake -S . -B build \
   -DCMAKE_PREFIX_PATH=/usr/local/Qt-6.10.1 \
-  -DBN_API_PATH=/path/to/binaryninja-api \
+  -DBN_API_PATH=../binaryninja-api \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-
-cmake --build build
+cmake --build build --target bifrost
+# plugin -> build/out/bin/libbifrost.dylib
 ```
-
-The plugin shared library is written to `build/out/bin/`. Copy or symlink it to your Binary Ninja user plugins directory:
-
-```bash
-# macOS — copy
-cp build/out/bin/libbifrost.dylib ~/Library/Application\ Support/Binary\ Ninja/plugins/
-
-# macOS — symlink (rebuilds are picked up automatically)
-ln -sf "$(pwd)/build/out/bin/libbifrost.dylib" ~/Library/Application\ Support/Binary\ Ninja/plugins/libbifrost.dylib
-```
-
-> **Version matching:** the `binaryninja-api` checkout must match your installed Binary Ninja build, or the link fails with undefined `_BN*` symbols. Check out the matching tag before building — e.g. for stable Binary Ninja 5.3.9757:
-> ```bash
-> git -C /path/to/binaryninja-api fetch --tags
-> git -C /path/to/binaryninja-api checkout stable/5.3.9757
-> ```
+</details>
 
 ## Testing
 
-`tests/` contains two small C fixtures (`target_v1.c`, `target_v2.c`) built as shared libraries, each function a deliberate diff case (identical, changed, renamed, block-reordered, added, removed). A headless end-to-end harness runs the real engine over them and asserts the expected result:
+`tests/` contains two small C fixtures (`target_v1.c`, `target_v2.c`) built as shared libraries, each function a deliberate diff case (identical, changed, renamed, block-reordered, added, removed). A headless harness runs the real engine over them and asserts the expected result:
 
 ```bash
-cmake --build build --target target_v1 target_v2 diff_harness
-./build/tests/bin/diff_harness \
-    build/tests/bin/libtarget_v1.dylib build/tests/bin/libtarget_v2.dylib
+./test.sh              # build the fixtures + harness, run the diff, check results
+./test.sh --verbose    # also print the full per-function diff
+./test.sh --no-build   # run against already-built binaries
 ```
 
-The harness links the Binary Ninja API/core and the (Qt-free) engine sources, so it exercises feature extraction on real analysis plus the full matching pipeline without the UI.
+The harness links the Binary Ninja API/core and the (Qt-free) engine sources, so it exercises feature extraction on real analysis plus the full matching pipeline without the UI. (It needs a Binary Ninja core that can initialise headlessly.)
 
 ## Related Projects
 
