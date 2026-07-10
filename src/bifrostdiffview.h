@@ -8,10 +8,7 @@
 
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSplitter>
-#include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QWidget>
-
-class BifrostCfgDiffView;
 
 // BifrostDiffView shows two full ViewFrames side by side (each with BN's
 // native file-type / view-type / IL-type combo toolbar).  The diff function
@@ -23,17 +20,9 @@ class BifrostDiffView : public QWidget
 {
     Q_OBJECT
 
-    QStackedWidget* m_stack       = nullptr; // [0] linear ViewFrames, [1] CFG diff
-    QSplitter*   m_frameSplit  = nullptr;
+    QSplitter*   m_frameSplit = nullptr;
     QPushButton* m_graphToggle = nullptr;
-    bool         m_graphMode   = false;
-
-    BifrostCfgDiffView* m_cfgDiff = nullptr;
-
-    // The function pair last navigated to, so toggling to Graph mode can render
-    // the current selection.
-    BinaryNinja::Ref<BinaryNinja::Function> m_curLeftFunc;
-    BinaryNinja::Ref<BinaryNinja::Function> m_curRightFunc;
+    bool         m_graphMode = false;
 
     ViewFrame*       m_leftFrame   = nullptr;
     ViewFrame*       m_rightFrame  = nullptr;
