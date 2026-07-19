@@ -6,23 +6,20 @@
 #include "viewframe.h"
 #include "filecontext.h"
 
-#include <QtWidgets/QPushButton>
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QWidget>
 
 // BifrostDiffView shows two full ViewFrames side by side (each with BN's
 // native file-type / view-type / IL-type combo toolbar).  The diff function
 // list is displayed in the BifrostSidebar (RightBottom) rather than inline.
-// A Linear/Graph toggle switches both panes together so the diff can be walked
-// as a side-by-side control-flow-graph comparison (block highlights render in
-// the graph view too).
+// Navigation and block/instruction highlighting are driven entirely by clicks
+// on that sidebar list — this view has no toolbar of its own. Use the ViewFrame
+// headers' own view-type control to switch a pane to the CFG graph.
 class BifrostDiffView : public QWidget
 {
     Q_OBJECT
 
-    QSplitter*   m_frameSplit = nullptr;
-    QPushButton* m_graphToggle = nullptr;
-    bool         m_graphMode = false;
+    QSplitter* m_frameSplit = nullptr;
 
     ViewFrame*       m_leftFrame   = nullptr;
     ViewFrame*       m_rightFrame  = nullptr;
@@ -54,12 +51,6 @@ class BifrostDiffView : public QWidget
     std::vector<uint64_t> m_leftInstrHi;
     std::vector<uint64_t> m_rightInstrHi;
 
-    // The non-identical blocks of the currently-navigated function pair, as
-    // (leftAddr, rightAddr) — 0 on a side means that block is absent there.
-    // Used by the block stepper to jump both panes to corresponding blocks.
-    std::vector<std::pair<uint64_t, uint64_t>> m_diffBlocks;
-    int m_curBlockIdx = -1;
-
     static std::string blockSignature(BinaryNinja::Ref<BinaryNinja::BasicBlock> block);
     static QString     bvDisplayName(BinaryNinja::Ref<BinaryNinja::BinaryView> bv);
     BinaryNinja::Ref<BinaryNinja::BinaryView> findBvByName(const QString& name) const;
@@ -78,19 +69,10 @@ class BifrostDiffView : public QWidget
     SplitPaneWidget* makeSplitPane(BinaryNinja::Ref<BinaryNinja::BinaryView> bv,
                                    ViewFrame*& frameOut);
     void initPanes();
-    // Re-resolve the binaries and rebuild both panes (used by the Reload button
-    // when the binaries are opened after the diff view).
-    void reloadPanes();
     // Open any still-missing binaries from the project (async) and schedule a
     // bounded retry of initPanes so their panes appear once loaded.
     void ensureBinariesOpen();
     static QString normalizeName(QString n);
-
-    // Switch both panes between the Linear and Graph view types.
-    void setPaneViewType(bool graph);
-    // Step both panes to the previous (dir<0) / next (dir>0) non-identical block
-    // of the current function pair, keeping the two graphs aligned.
-    void stepBlock(int dir);
 
 public:
     explicit BifrostDiffView(QWidget* parent,

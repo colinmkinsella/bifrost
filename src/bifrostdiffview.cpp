@@ -6,11 +6,8 @@
 #include "pane.h"
 #include "uicontext.h"
 
-#include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
-#include <QtGui/QKeySequence>
 #include <QtGui/QShowEvent>
-#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QVBoxLayout>
@@ -160,38 +157,9 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
     outerLayout->setContentsMargins(0, 0, 0, 0);
     outerLayout->setSpacing(0);
 
-    // Header toolbar: Linear/Graph toggle switches both panes together.
-    m_graphToggle = new QPushButton("Graph view", this);
-    m_graphToggle->setCheckable(true);
-    m_graphToggle->setToolTip("Toggle both panes between Linear and Control-Flow Graph views");
-    connect(m_graphToggle, &QPushButton::toggled, this, [this](bool on) { setPaneViewType(on); });
-
-    auto* reloadBtn = new QPushButton("Reload", this);
-    reloadBtn->setToolTip("Re-resolve and reload both binaries (use after opening them)");
-    connect(reloadBtn, &QPushButton::clicked, this, [this]() { reloadPanes(); });
-
-    // Block stepper: walk the changed/added/removed blocks of the current
-    // function, keeping both panes (linear or graph) on the corresponding block.
-    auto* prevBlkBtn = new QPushButton("◀ Blk", this);
-    auto* nextBlkBtn = new QPushButton("Blk ▶", this);
-    prevBlkBtn->setToolTip("Jump both panes to the previous differing block");
-    nextBlkBtn->setToolTip("Jump both panes to the next differing block");
-    prevBlkBtn->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F7));
-    nextBlkBtn->setShortcut(QKeySequence(Qt::Key_F7));
-    connect(prevBlkBtn, &QPushButton::clicked, this, [this]() { stepBlock(-1); });
-    connect(nextBlkBtn, &QPushButton::clicked, this, [this]() { stepBlock(+1); });
-
-    auto* header = new QHBoxLayout();
-    header->setContentsMargins(4, 2, 4, 2);
-    header->addWidget(m_graphToggle);
-    header->addWidget(reloadBtn);
-    header->addSpacing(12);
-    header->addWidget(prevBlkBtn);
-    header->addWidget(nextBlkBtn);
-    header->addStretch(1);
-    outerLayout->addLayout(header);
-
-    // The two panes side by side — diff list lives in the sidebar.
+    // The two panes side by side — diff list lives in the sidebar. Navigation
+    // and block/instruction highlighting are driven entirely from sidebar clicks
+    // (see navigateToEntry); there is no per-view toolbar.
     m_frameSplit = new QSplitter(Qt::Horizontal, this);
     m_frameSplit->setChildrenCollapsible(false);
 
@@ -327,10 +295,6 @@ void BifrostDiffView::initPanes()
     if (builtLeft)  connectKick(m_leftFrame,  m_leftWidget);
     if (builtRight) connectKick(m_rightFrame, m_rightWidget);
 
-    // Restore the graph/linear mode on freshly-built frames.
-    if ((builtLeft || builtRight) && m_graphMode)
-        setPaneViewType(true);
-
     // If a side is still missing, open it from the project and retry.
     ensureBinariesOpen();
 }
@@ -372,49 +336,6 @@ void BifrostDiffView::ensureBinariesOpen()
     }
 }
 
-void BifrostDiffView::reloadPanes()
-{
-    // Tear down existing frames so both sides rebuild from scratch, and reset
-    // the auto-open state so it can try again.
-    m_leftFrame = m_rightFrame = nullptr;
-    m_leftWidget = m_rightWidget = nullptr;
-    m_autoOpenTried = false;
-    m_resolveAttempts = 0;
-    m_leftBv  = findBvByName(m_leftBvName);
-    m_rightBv = findBvByName(m_rightBvName);
-    initPanes();
-}
-
-void BifrostDiffView::setPaneViewType(bool graph)
-{
-    m_graphMode = graph;
-    const QString type = graph ? "Graph" : "Linear";
-    if (m_leftFrame)  m_leftFrame->setViewType(type);
-    if (m_rightFrame) m_rightFrame->setViewType(type);
-    if (m_graphToggle)
-    {
-        QSignalBlocker block(m_graphToggle);
-        m_graphToggle->setChecked(graph);
-        m_graphToggle->setText(graph ? "Linear view" : "Graph view");
-    }
-}
-
-void BifrostDiffView::stepBlock(int dir)
-{
-    const int n = static_cast<int>(m_diffBlocks.size());
-    if (n == 0) return;
-
-    // Start from before-first / after-last so the first press lands on an end.
-    if (m_curBlockIdx < 0) m_curBlockIdx = (dir > 0) ? -1 : n;
-    int next = m_curBlockIdx + dir;
-    if (next < 0 || next >= n) return;   // no wrap-around
-    m_curBlockIdx = next;
-
-    const auto& [la, ra] = m_diffBlocks[m_curBlockIdx];
-    if (m_leftFrame  && la) m_leftFrame->navigate(m_leftBv,  la);
-    if (m_rightFrame && ra) m_rightFrame->navigate(m_rightBv, ra);
-}
-
 // ── Navigation (called by sidebar) ───────────────────────────────────────────
 
 void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
@@ -430,10 +351,6 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
     // scroll — navigation is the last thing we do below.
     clearHighlights();
 
-    // Reset the block stepper for the new function pair.
-    m_diffBlocks.clear();
-    m_curBlockIdx = -1;
-
     // Only mutate user highlights on a side whose view is materialized; setting
     // a highlight on a binary whose pane isn't live (e.g. still auto-opening)
     // makes BN deref a null current-view widget and crash (see sideHighlightSafe).
@@ -444,25 +361,19 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
     if ((status == "identical" || status == "changed" || status == "matched")
         && lf && rf && leftSafe && rightSafe)
     {
-        applyBlockHighlights(lf, rf);   // also fills m_diffBlocks
+        applyBlockHighlights(lf, rf);
         m_prevLeftFunc = lf; m_prevRightFunc = rf;
     }
     else if (status == "removed" && lf && leftSafe)
     {
         for (auto& bb : lf->GetBasicBlocks())
-        {
             bb->SetUserBasicBlockHighlight(RedHighlightColor);
-            m_diffBlocks.emplace_back(bb->GetStart(), 0);
-        }
         m_prevLeftFunc = lf;
     }
     else if (status == "added" && rf && rightSafe)
     {
         for (auto& bb : rf->GetBasicBlocks())
-        {
             bb->SetUserBasicBlockHighlight(GreenHighlightColor);
-            m_diffBlocks.emplace_back(0, bb->GetStart());
-        }
         m_prevRightFunc = rf;
     }
 
@@ -547,10 +458,6 @@ void BifrostDiffView::applyBlockHighlights(Ref<Function> lf, Ref<Function> rf)
         if (bm.rightAddr)
             if (auto it = rBlocks.find(bm.rightAddr); it != rBlocks.end())
                 it->second->SetUserBasicBlockHighlight(col);
-
-        // Record the non-identical blocks for the block stepper.
-        if (bm.status != bifrost::MatchStatus::Identical)
-            m_diffBlocks.emplace_back(bm.leftAddr, bm.rightAddr);
 
         if (bm.status == bifrost::MatchStatus::Changed && bm.leftAddr && bm.rightAddr)
         {
