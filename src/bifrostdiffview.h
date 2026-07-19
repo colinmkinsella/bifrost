@@ -66,6 +66,15 @@ class BifrostDiffView : public QWidget
 
     static FileContext* fileContextForBv(BinaryNinja::Ref<BinaryNinja::BinaryView> bv);
 
+    // True when it is safe to set/clear user highlights on functions in `bv`:
+    // its pane `frame` is built AND the BinaryView's current view frame has a
+    // materialized widget. BN's highlight-changed refresh calls
+    // FileContext::GetCurrentView() → ViewFrame::getTypeForView(getCurrentWidget())
+    // and does NOT null-check the widget, so highlighting a binary whose view
+    // isn't materialized yet (e.g. still auto-opening) crashes inside BN.
+    bool sideHighlightSafe(ViewFrame* frame,
+                           BinaryNinja::Ref<BinaryNinja::BinaryView> bv) const;
+
     SplitPaneWidget* makeSplitPane(BinaryNinja::Ref<BinaryNinja::BinaryView> bv,
                                    ViewFrame*& frameOut);
     void initPanes();

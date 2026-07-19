@@ -115,6 +115,19 @@ static Ref<Function> funcAtAddr(Ref<BinaryView> bv, uint64_t addr)
     return nullptr;
 }
 
+bool BifrostDiffView::sideHighlightSafe(ViewFrame* frame, Ref<BinaryView> bv) const
+{
+    // Our pane must be built, and the owning FileContext's current view frame
+    // must have a materialized widget. This mirrors exactly the pointer BN
+    // dereferences (without a null check) when a user highlight changes:
+    // FileContext::GetCurrentView() → currentViewFrame->getCurrentWidget().
+    if (!frame || !bv) return false;
+    FileContext* fc = fileContextForBv(bv);
+    if (!fc) return false;
+    ViewFrame* cur = fc->getCurrentViewFrame();
+    return cur && cur->getCurrentWidget() != nullptr;
+}
+
 SplitPaneWidget* BifrostDiffView::makeSplitPane(Ref<BinaryView> bv, ViewFrame*& frameOut)
 {
     FileContext* fc = fileContextForBv(bv);
@@ -421,14 +434,20 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
     m_diffBlocks.clear();
     m_curBlockIdx = -1;
 
+    // Only mutate user highlights on a side whose view is materialized; setting
+    // a highlight on a binary whose pane isn't live (e.g. still auto-opening)
+    // makes BN deref a null current-view widget and crash (see sideHighlightSafe).
+    const bool leftSafe  = sideHighlightSafe(m_leftFrame,  m_leftBv);
+    const bool rightSafe = sideHighlightSafe(m_rightFrame, m_rightBv);
+
     // A matched pair (identical or changed) → per-block match highlighting.
     if ((status == "identical" || status == "changed" || status == "matched")
-        && lf && rf)
+        && lf && rf && leftSafe && rightSafe)
     {
         applyBlockHighlights(lf, rf);   // also fills m_diffBlocks
         m_prevLeftFunc = lf; m_prevRightFunc = rf;
     }
-    else if (status == "removed" && lf)
+    else if (status == "removed" && lf && leftSafe)
     {
         for (auto& bb : lf->GetBasicBlocks())
         {
@@ -437,7 +456,7 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
         }
         m_prevLeftFunc = lf;
     }
-    else if (status == "added" && rf)
+    else if (status == "added" && rf && rightSafe)
     {
         for (auto& bb : rf->GetBasicBlocks())
         {
@@ -473,13 +492,18 @@ void BifrostDiffView::clearHighlights()
     BNHighlightColor none{}; none.style = StandardHighlightColor;
     none.color = NoHighlightColor; none.alpha = 0;
 
-    clearBlockHighlights(m_prevLeftFunc);
-    clearBlockHighlights(m_prevRightFunc);
+    // Clearing sets NoHighlight, which goes through the same BN refresh path as
+    // setting one, so it is only safe while the side's view is materialized.
+    const bool leftSafe  = sideHighlightSafe(m_leftFrame,  m_leftBv);
+    const bool rightSafe = sideHighlightSafe(m_rightFrame, m_rightBv);
 
-    if (m_prevLeftFunc)
+    if (leftSafe)  clearBlockHighlights(m_prevLeftFunc);
+    if (rightSafe) clearBlockHighlights(m_prevRightFunc);
+
+    if (m_prevLeftFunc && leftSafe)
         for (uint64_t a : m_leftInstrHi)
             m_prevLeftFunc->SetUserInstructionHighlight(m_prevLeftFunc->GetArchitecture(), a, none);
-    if (m_prevRightFunc)
+    if (m_prevRightFunc && rightSafe)
         for (uint64_t a : m_rightInstrHi)
             m_prevRightFunc->SetUserInstructionHighlight(m_prevRightFunc->GetArchitecture(), a, none);
 
