@@ -8,6 +8,7 @@
 
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
+#include <QtGui/QKeySequence>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QSplitter>
@@ -155,10 +156,24 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
     reloadBtn->setToolTip("Re-resolve and reload both binaries (use after opening them)");
     connect(reloadBtn, &QPushButton::clicked, this, [this]() { reloadPanes(); });
 
+    // Block stepper: walk the changed/added/removed blocks of the current
+    // function, keeping both panes (linear or graph) on the corresponding block.
+    auto* prevBlkBtn = new QPushButton("◀ Blk", this);
+    auto* nextBlkBtn = new QPushButton("Blk ▶", this);
+    prevBlkBtn->setToolTip("Jump both panes to the previous differing block");
+    nextBlkBtn->setToolTip("Jump both panes to the next differing block");
+    prevBlkBtn->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F7));
+    nextBlkBtn->setShortcut(QKeySequence(Qt::Key_F7));
+    connect(prevBlkBtn, &QPushButton::clicked, this, [this]() { stepBlock(-1); });
+    connect(nextBlkBtn, &QPushButton::clicked, this, [this]() { stepBlock(+1); });
+
     auto* header = new QHBoxLayout();
     header->setContentsMargins(4, 2, 4, 2);
     header->addWidget(m_graphToggle);
     header->addWidget(reloadBtn);
+    header->addSpacing(12);
+    header->addWidget(prevBlkBtn);
+    header->addWidget(nextBlkBtn);
     header->addStretch(1);
     outerLayout->addLayout(header);
 
@@ -360,6 +375,22 @@ void BifrostDiffView::setPaneViewType(bool graph)
     }
 }
 
+void BifrostDiffView::stepBlock(int dir)
+{
+    const int n = static_cast<int>(m_diffBlocks.size());
+    if (n == 0) return;
+
+    // Start from before-first / after-last so the first press lands on an end.
+    if (m_curBlockIdx < 0) m_curBlockIdx = (dir > 0) ? -1 : n;
+    int next = m_curBlockIdx + dir;
+    if (next < 0 || next >= n) return;   // no wrap-around
+    m_curBlockIdx = next;
+
+    const auto& [la, ra] = m_diffBlocks[m_curBlockIdx];
+    if (m_leftFrame  && la) m_leftFrame->navigate(m_leftBv,  la);
+    if (m_rightFrame && ra) m_rightFrame->navigate(m_rightBv, ra);
+}
+
 // ── Navigation (called by sidebar) ───────────────────────────────────────────
 
 void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
@@ -375,21 +406,33 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
     // scroll — navigation is the last thing we do below.
     clearHighlights();
 
+    // Reset the block stepper for the new function pair.
+    m_diffBlocks.clear();
+    m_curBlockIdx = -1;
+
     // A matched pair (identical or changed) → per-block match highlighting.
     if ((status == "identical" || status == "changed" || status == "matched")
         && lf && rf)
     {
-        applyBlockHighlights(lf, rf);
+        applyBlockHighlights(lf, rf);   // also fills m_diffBlocks
         m_prevLeftFunc = lf; m_prevRightFunc = rf;
     }
     else if (status == "removed" && lf)
     {
-        for (auto& bb : lf->GetBasicBlocks()) bb->SetUserBasicBlockHighlight(RedHighlightColor);
+        for (auto& bb : lf->GetBasicBlocks())
+        {
+            bb->SetUserBasicBlockHighlight(RedHighlightColor);
+            m_diffBlocks.emplace_back(bb->GetStart(), 0);
+        }
         m_prevLeftFunc = lf;
     }
     else if (status == "added" && rf)
     {
-        for (auto& bb : rf->GetBasicBlocks()) bb->SetUserBasicBlockHighlight(GreenHighlightColor);
+        for (auto& bb : rf->GetBasicBlocks())
+        {
+            bb->SetUserBasicBlockHighlight(GreenHighlightColor);
+            m_diffBlocks.emplace_back(0, bb->GetStart());
+        }
         m_prevRightFunc = rf;
     }
 
@@ -469,6 +512,10 @@ void BifrostDiffView::applyBlockHighlights(Ref<Function> lf, Ref<Function> rf)
         if (bm.rightAddr)
             if (auto it = rBlocks.find(bm.rightAddr); it != rBlocks.end())
                 it->second->SetUserBasicBlockHighlight(col);
+
+        // Record the non-identical blocks for the block stepper.
+        if (bm.status != bifrost::MatchStatus::Identical)
+            m_diffBlocks.emplace_back(bm.leftAddr, bm.rightAddr);
 
         if (bm.status == bifrost::MatchStatus::Changed && bm.leftAddr && bm.rightAddr)
         {

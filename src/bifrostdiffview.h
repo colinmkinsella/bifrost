@@ -47,6 +47,12 @@ class BifrostDiffView : public QWidget
     std::vector<uint64_t> m_leftInstrHi;
     std::vector<uint64_t> m_rightInstrHi;
 
+    // The non-identical blocks of the currently-navigated function pair, as
+    // (leftAddr, rightAddr) — 0 on a side means that block is absent there.
+    // Used by the block stepper to jump both panes to corresponding blocks.
+    std::vector<std::pair<uint64_t, uint64_t>> m_diffBlocks;
+    int m_curBlockIdx = -1;
+
     static std::string blockSignature(BinaryNinja::Ref<BinaryNinja::BasicBlock> block);
     static QString     bvDisplayName(BinaryNinja::Ref<BinaryNinja::BinaryView> bv);
     BinaryNinja::Ref<BinaryNinja::BinaryView> findBvByName(const QString& name) const;
@@ -66,6 +72,9 @@ class BifrostDiffView : public QWidget
 
     // Switch both panes between the Linear and Graph view types.
     void setPaneViewType(bool graph);
+    // Step both panes to the previous (dir<0) / next (dir>0) non-identical block
+    // of the current function pair, keeping the two graphs aligned.
+    void stepBlock(int dir);
 
 public:
     explicit BifrostDiffView(QWidget* parent,
