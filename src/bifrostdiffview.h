@@ -37,6 +37,11 @@ class BifrostDiffView : public QWidget
     BinaryNinja::Ref<BinaryNinja::Function> m_prevLeftFunc;
     BinaryNinja::Ref<BinaryNinja::Function> m_prevRightFunc;
 
+    // Auto-open-from-project state: openProjectFile is async, so we open the
+    // missing binaries once and retry building the panes on a bounded timer.
+    bool m_autoOpenTried = false;
+    int  m_resolveAttempts = 0;
+
     // Instruction addresses currently highlighted, so they can be cleared on
     // the next navigation without scanning the whole function.
     std::vector<uint64_t> m_leftInstrHi;
@@ -54,6 +59,10 @@ class BifrostDiffView : public QWidget
     // Re-resolve the binaries and rebuild both panes (used by the Reload button
     // when the binaries are opened after the diff view).
     void reloadPanes();
+    // Open any still-missing binaries from the project (async) and schedule a
+    // bounded retry of initPanes so their panes appear once loaded.
+    void ensureBinariesOpen();
+    static QString normalizeName(QString n);
 
     // Switch both panes between the Linear and Graph view types.
     void setPaneViewType(bool graph);

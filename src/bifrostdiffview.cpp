@@ -56,7 +56,7 @@ using namespace BinaryNinja;
 
 // Strip common binary / database extensions so a diff saved against
 // "foo.dylib" still resolves when the user has "foo.bndb" open.
-static QString normalizeName(QString n)
+/*static*/ QString BifrostDiffView::normalizeName(QString n)
 {
     for (auto* ext : {".bndb", ".dylib", ".so", ".exe", ".dll", ".o", ".bin"})
         n.remove(ext, Qt::CaseInsensitive);
@@ -222,17 +222,24 @@ void BifrostDiffView::initPanes()
     if (!m_leftBv  && !m_leftBvName.isEmpty())  m_leftBv  = findBvByName(m_leftBvName);
     if (!m_rightBv && !m_rightBvName.isEmpty()) m_rightBv = findBvByName(m_rightBvName);
 
+    // Build a side only if it isn't already built, so retries (from the async
+    // auto-open) never disturb a pane that is already showing. Returns true when
+    // a new ViewFrame was created for this side.
     auto buildSide = [&](Ref<BinaryView> bv, const QString& bvName,
                          ViewFrame*& frameOut, SplitPaneWidget*& widgetOut,
-                         int splitterIndex)
+                         int splitterIndex) -> bool
     {
+        if (frameOut) return false;   // already built — leave it alone
+
         QWidget* replacement = nullptr;
+        bool built = false;
         if (bv)
         {
             widgetOut = makeSplitPane(bv, frameOut);
             if (widgetOut)
             {
                 replacement = widgetOut;
+                built = true;
                 // Point the frame at the analyzed view's first function so it
                 // opens on disassembly rather than a raw hex dump.
                 if (frameOut)
@@ -248,8 +255,9 @@ void BifrostDiffView::initPanes()
         if (!replacement)
         {
             auto* ph = new QLabel(
-                QString("Binary not open:\n%1\n\nOpen this binary first,\nthen reopen the diff.")
-                    .arg(bvName),
+                QString("Opening %1 from the project…\n\n"
+                        "If this persists, open it manually and click Reload.")
+                    .arg(bvName.isEmpty() ? "(unknown)" : bvName),
                 m_frameSplit);
             ph->setAlignment(Qt::AlignCenter);
             ph->setWordWrap(true);
@@ -259,12 +267,13 @@ void BifrostDiffView::initPanes()
         QWidget* old = m_frameSplit->widget(splitterIndex);
         m_frameSplit->replaceWidget(splitterIndex, replacement);
         delete old;
+        return built;
     };
 
-    buildSide(m_leftBv,  m_leftBvName,  m_leftFrame,  m_leftWidget,  0);
-    buildSide(m_rightBv, m_rightBvName, m_rightFrame, m_rightWidget, 1);
+    bool builtLeft  = buildSide(m_leftBv,  m_leftBvName,  m_leftFrame,  m_leftWidget,  0);
+    bool builtRight = buildSide(m_rightBv, m_rightBvName, m_rightFrame, m_rightWidget, 1);
 
-    // Kick ViewPaneHeaders to install the IL-level subtype widget.
+    // Kick ViewPaneHeaders to install the IL-level subtype widget (new frames only).
     auto connectKick = [](ViewFrame* frame, SplitPaneWidget* w) {
         if (!frame || !w) return;
         QObject::connect(frame, &ViewFrame::notifyViewChanged, w,
@@ -276,17 +285,62 @@ void BifrostDiffView::initPanes()
                 });
             }, Qt::QueuedConnection);
     };
-    connectKick(m_leftFrame,  m_leftWidget);
-    connectKick(m_rightFrame, m_rightWidget);
+    if (builtLeft)  connectKick(m_leftFrame,  m_leftWidget);
+    if (builtRight) connectKick(m_rightFrame, m_rightWidget);
 
     // Restore the graph/linear mode on freshly-built frames.
-    if (m_graphMode)
+    if ((builtLeft || builtRight) && m_graphMode)
         setPaneViewType(true);
+
+    // If a side is still missing, open it from the project and retry.
+    ensureBinariesOpen();
+}
+
+void BifrostDiffView::ensureBinariesOpen()
+{
+    constexpr int kMaxResolveAttempts = 20;   // ~14s at 700ms
+
+    bool leftMissing  = !m_leftBv  && !m_leftBvName.isEmpty();
+    bool rightMissing = !m_rightBv && !m_rightBvName.isEmpty();
+    if (!leftMissing && !rightMissing)
+        return;   // both resolved — done
+
+    UIContext* ctx = UIContext::activeContext();
+    Ref<Project> project = ctx ? ctx->getProject() : nullptr;
+
+    // Kick the async open(s) exactly once.
+    if (ctx && project && project->IsOpen() && !m_autoOpenTried)
+    {
+        m_autoOpenTried = true;
+        auto openMatch = [&](const QString& name) {
+            const QString target = normalizeName(name);
+            for (auto& pfile : project->GetFiles())
+                if (normalizeName(QString::fromStdString(pfile->GetName())) == target)
+                {
+                    ctx->openProjectFile(pfile);
+                    return;
+                }
+        };
+        if (leftMissing)  openMatch(m_leftBvName);
+        if (rightMissing) openMatch(m_rightBvName);
+    }
+
+    // Retry building the still-missing panes once the async open completes.
+    if (m_resolveAttempts < kMaxResolveAttempts)
+    {
+        ++m_resolveAttempts;
+        QTimer::singleShot(700, this, [this]() { initPanes(); });
+    }
 }
 
 void BifrostDiffView::reloadPanes()
 {
-    // Force a fresh resolution (the binaries may have been opened since).
+    // Tear down existing frames so both sides rebuild from scratch, and reset
+    // the auto-open state so it can try again.
+    m_leftFrame = m_rightFrame = nullptr;
+    m_leftWidget = m_rightWidget = nullptr;
+    m_autoOpenTried = false;
+    m_resolveAttempts = 0;
     m_leftBv  = findBvByName(m_leftBvName);
     m_rightBv = findBvByName(m_rightBvName);
     initPanes();
