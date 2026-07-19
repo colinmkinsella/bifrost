@@ -34,6 +34,13 @@ class BifrostDiffView : public QWidget
     QString m_leftBvName;
     QString m_rightBvName;
 
+    // The diff this view shows, kept so the view can re-register itself as the
+    // active diff whenever its tab is shown (so multiple diff views coexist).
+    BinaryNinja::Ref<BinaryNinja::Metadata> m_diffData;
+
+    // Register this view as the active diff driver (nav callbacks + diff data).
+    void registerActive();
+
     BinaryNinja::Ref<BinaryNinja::Function> m_prevLeftFunc;
     BinaryNinja::Ref<BinaryNinja::Function> m_prevRightFunc;
 
@@ -84,6 +91,11 @@ public:
 
     // Called by the sidebar when the user clicks a diff entry.
     void navigateToEntry(uint64_t leftAddr, uint64_t rightAddr, const QString& status);
+
+protected:
+    void showEvent(QShowEvent* event) override;
+
+public:
 
     static bool isSemanticToken(BNInstructionTextTokenType t);
     void clearBlockHighlights(BinaryNinja::Ref<BinaryNinja::Function> func);

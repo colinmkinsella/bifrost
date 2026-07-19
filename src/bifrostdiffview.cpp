@@ -9,6 +9,7 @@
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
 #include <QtGui/QKeySequence>
+#include <QtGui/QShowEvent>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QSplitter>
@@ -195,24 +196,12 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
     m_frameSplit->setSizes({500, 500});
     outerLayout->addWidget(m_frameSplit, 1);
 
-    // Push the diff data into the singleton so the sidebar can display it.
-    auto& state = BifrostPaneState::instance();
-    state.activeDiffData = diffData;
-
-    // Register navigate callbacks so the sidebar can drive our panes.
-    state.navigateLeft = [this](uint64_t addr) {
-        if (m_leftFrame && m_leftBv) m_leftFrame->navigate(m_leftBv, addr);
-    };
-    state.navigateRight = [this](uint64_t addr) {
-        if (m_rightFrame && m_rightBv) m_rightFrame->navigate(m_rightBv, addr);
-    };
-    // Navigate both panes and apply diff highlighting for a clicked entry.
-    state.highlightEntry = [this](uint64_t l, uint64_t r, const std::string& status) {
-        navigateToEntry(l, r, QString::fromStdString(status));
-    };
+    // Register as the active diff (nav callbacks + diff data), keyed by `this`.
+    m_diffData = diffData;
+    registerActive();
 
     // Defer pane creation until after createTabForWidget has parented us.
-    QTimer::singleShot(0, this, [this, diffData]() {
+    QTimer::singleShot(0, this, [this]() {
         initPanes();
         // Notify sidebar now that panes are ready.
         BifrostPaneState::instance().notifyDiffChanged();
@@ -223,11 +212,33 @@ BifrostDiffView::~BifrostDiffView()
 {
     clearHighlights();
 
-    // Clear diff state so the sidebar resets.
+    // Clear our own callbacks/diff (owner-guarded so we never wipe another diff
+    // view's state), then let the sidebar refresh from whatever is active now.
     auto& state = BifrostPaneState::instance();
-    state.activeDiffData = nullptr;
-    state.clearCallbacks();
+    state.clearNav(this);
+    state.clearDiff(this);
     state.notifyDiffChanged();
+}
+
+void BifrostDiffView::registerActive()
+{
+    auto& state = BifrostPaneState::instance();
+    state.setNav(this,
+        [this](uint64_t addr) { if (m_leftFrame  && m_leftBv)  m_leftFrame->navigate(m_leftBv, addr); },
+        [this](uint64_t addr) { if (m_rightFrame && m_rightBv) m_rightFrame->navigate(m_rightBv, addr); },
+        [this](uint64_t l, uint64_t r, const std::string& status) {
+            navigateToEntry(l, r, QString::fromStdString(status));
+        });
+    state.setDiff(this, m_diffData);
+}
+
+void BifrostDiffView::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    // Re-activate when this tab is shown so switching between open diff views
+    // hands the sidebar and panes to the one in front.
+    registerActive();
+    BifrostPaneState::instance().notifyDiffChanged();
 }
 
 // ── Deferred pane initialisation ──────────────────────────────────────────────

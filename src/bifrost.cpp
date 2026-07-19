@@ -67,10 +67,14 @@ BifrostContainer::BifrostContainer(QWidget* parent, Ref<BinaryView> data, ViewFr
 
 BifrostContainer::~BifrostContainer()
 {
-    // Release BinaryView refs and callbacks from the singleton before BN tears
-    // down its core objects — prevents use-after-free during static cleanup.
-    BifrostPaneState::instance().set(nullptr, nullptr);
-    BifrostPaneState::instance().clearCallbacks();
+    // Release our callbacks (and, if we're the active driver, our BinaryView
+    // refs) from the singleton before BN tears down its core objects. Both are
+    // owner-guarded so a destroyed non-active container can't wipe an active
+    // diff view's state — prevents use-after-free during static cleanup.
+    auto& s = BifrostPaneState::instance();
+    if (s.navOwner == this)
+        s.set(nullptr, nullptr);
+    s.clearNav(this);
 }
 
 // --- Display helpers ---------------------------------------------------------
@@ -114,8 +118,10 @@ void BifrostContainer::pushPaneState()
 {
     auto& s = BifrostPaneState::instance();
     s.set(m_leftView->getData(), m_rightView->getData());
-    s.navigateLeft  = [this](uint64_t addr) { m_leftView->navigate(addr);  };
-    s.navigateRight = [this](uint64_t addr) { m_rightView->navigate(addr); };
+    s.setNav(this,
+             [this](uint64_t addr) { m_leftView->navigate(addr);  },
+             [this](uint64_t addr) { m_rightView->navigate(addr); },
+             nullptr);  // split view has no diff-highlight callback
 }
 
 void BifrostContainer::saveProjectState() const

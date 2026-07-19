@@ -25,8 +25,47 @@ struct BifrostPaneState
     // Args: leftAddr, rightAddr, status ("identical"|"changed"|"added"|"removed").
     std::function<void(uint64_t, uint64_t, const std::string&)> highlightEntry;
 
-    // Active diff metadata — set by BifrostDiffView or runDiff, read by sidebar.
+    // Active diff metadata — set by BifrostDiffView, read by sidebar.
     BinaryNinja::Ref<BinaryNinja::Metadata> activeDiffData;
+
+    // Owners of the nav callbacks and the active diff, so each is cleared only
+    // by whoever set it (a destroyed view must not wipe another view's state).
+    void* navOwner = nullptr;
+    void* diffOwner = nullptr;
+
+    // Set/clear the nav callbacks (owner = the driving BifrostContainer or
+    // BifrostDiffView). clearNav is a no-op if someone else is now active.
+    void setNav(void* owner,
+                std::function<void(uint64_t)> navLeft,
+                std::function<void(uint64_t)> navRight,
+                std::function<void(uint64_t, uint64_t, const std::string&)> highlight)
+    {
+        navOwner       = owner;
+        navigateLeft   = std::move(navLeft);
+        navigateRight  = std::move(navRight);
+        highlightEntry = std::move(highlight);
+    }
+    void clearNav(void* owner)
+    {
+        if (navOwner != owner) return;
+        navOwner       = nullptr;
+        navigateLeft   = nullptr;
+        navigateRight  = nullptr;
+        highlightEntry = nullptr;
+    }
+
+    // Set/clear the active diff (owner = the BifrostDiffView showing it).
+    void setDiff(void* owner, BinaryNinja::Ref<BinaryNinja::Metadata> data)
+    {
+        diffOwner      = owner;
+        activeDiffData = data;
+    }
+    void clearDiff(void* owner)
+    {
+        if (diffOwner != owner) return;
+        diffOwner      = nullptr;
+        activeDiffData = nullptr;
+    }
 
     // Observers notified when activeDiffData changes, each keyed by its owner
     // (the widget pointer) so it can be removed precisely on destruction — a
@@ -66,13 +105,6 @@ struct BifrostPaneState
     {
         leftData  = left;
         rightData = right;
-    }
-
-    void clearCallbacks()
-    {
-        navigateLeft   = nullptr;
-        navigateRight  = nullptr;
-        highlightEntry = nullptr;
     }
 
 private:
