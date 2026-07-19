@@ -24,6 +24,7 @@ extern "C"
     BINARYNINJAPLUGIN bool UIPluginInit()
     {
         BifrostViewType::init();
+        BifrostDiffViewType::init();
         BifrostSidebarWidgetType::init();
 
         // ── Plugins → Bifrost → Run Diff… ──────────────────────────────────

@@ -4,6 +4,7 @@
 #include "binaryninjaapi.h"
 #include "pane.h"
 #include "viewframe.h"
+#include "viewtype.h"
 #include "filecontext.h"
 
 #include <QtWidgets/QSplitter>
@@ -15,11 +16,20 @@
 // Navigation and block/instruction highlighting are driven entirely by clicks
 // on that sidebar list — this view has no toolbar of its own. Use the ViewFrame
 // headers' own view-type control to switch a pane to the CFG graph.
-class BifrostDiffView : public QWidget
+//
+// It implements View so it can be produced by BifrostDiffViewType when a diff
+// .bndb is opened from the project browser (BN resolves a View* from the widget
+// via View::getViewFromWidget, and a null there is not survivable). When opened
+// as a plain tab instead, m_diffBv is null and the View methods are inert.
+class BifrostDiffView : public QWidget, public View
 {
     Q_OBJECT
 
     QSplitter* m_frameSplit = nullptr;
+
+    // The diff database this view was opened from, when it came from a .bndb
+    // project file. Null when the view was opened as a plain tab.
+    BinaryNinja::Ref<BinaryNinja::BinaryView> m_diffBv;
 
     ViewFrame*       m_leftFrame   = nullptr;
     ViewFrame*       m_rightFrame  = nullptr;
@@ -37,6 +47,10 @@ class BifrostDiffView : public QWidget
 
     // Register this view as the active diff driver (nav callbacks + diff data).
     void registerActive();
+
+    // Shared construction: both constructors funnel here once they have the
+    // diff metadata (from the caller, or read out of a diff database).
+    void init(BinaryNinja::Ref<BinaryNinja::Metadata> diffData);
 
     BinaryNinja::Ref<BinaryNinja::Function> m_prevLeftFunc;
     BinaryNinja::Ref<BinaryNinja::Function> m_prevRightFunc;
@@ -78,10 +92,23 @@ public:
     explicit BifrostDiffView(QWidget* parent,
                              BinaryNinja::Ref<BinaryNinja::Metadata> diffData,
                              const QString& diffName);
+    // Opened from a diff .bndb in the project browser: the diff is read out of
+    // the database's metadata (see bifrostDiffFromBinaryView).
+    explicit BifrostDiffView(QWidget* parent,
+                             BinaryNinja::Ref<BinaryNinja::BinaryView> diffBv);
     virtual ~BifrostDiffView() override;
 
     // Called by the sidebar when the user clicks a diff entry.
     void navigateToEntry(uint64_t leftAddr, uint64_t rightAddr, const QString& status);
+
+    // ── View ────────────────────────────────────────────────────────────────
+    // A diff view has no address space of its own; navigation happens through
+    // the two embedded panes, driven from the sidebar.
+    virtual BinaryViewRef getData() override { return m_diffBv; }
+    virtual uint64_t getCurrentOffset() override { return 0; }
+    virtual void setSelectionOffsets(BNAddressRange) override {}
+    virtual bool navigate(uint64_t) override { return false; }
+    virtual QFont getFont() override;
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -101,4 +128,23 @@ public:
                                    BinaryNinja::Ref<BinaryNinja::Function> rf,
                                    BinaryNinja::Ref<BinaryNinja::BasicBlock> lb,
                                    BinaryNinja::Ref<BinaryNinja::BasicBlock> rb);
+};
+
+// Renders a diff .bndb (a database carrying the "bifrost.diff" metadata key) as
+// a BifrostDiffView, so double-clicking a saved diff in the project browser
+// opens the diff walkthrough instead of a hex dump. Ordinary binaries score 0
+// here, so this never competes for them.
+class BifrostDiffViewType : public ViewType
+{
+    static BifrostDiffViewType* m_instance;
+
+public:
+    BifrostDiffViewType();
+
+    virtual int getPriority(BinaryNinja::Ref<BinaryNinja::BinaryView> data,
+                            const QString& filename) override;
+    virtual QWidget* create(BinaryNinja::Ref<BinaryNinja::BinaryView> data,
+                            ViewFrame* viewFrame) override;
+
+    static void init();
 };

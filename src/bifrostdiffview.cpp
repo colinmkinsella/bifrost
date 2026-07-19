@@ -1,8 +1,10 @@
 #include "bifrostdiffview.h"
+#include "bifrostdiffdb.h"
 #include "bifrostdiffstore.h"
 #include "bifrostfeatures.h"
 #include "bifrostmatch.h"
 #include "filecontext.h"
+#include "fontsettings.h"
 #include "pane.h"
 #include "uicontext.h"
 
@@ -142,6 +144,27 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
                                   const QString& /* diffName */)
     : QWidget(parent)
 {
+    init(diffData);
+}
+
+// Opened from a diff .bndb: the diff rides in the database's metadata.
+BifrostDiffView::BifrostDiffView(QWidget* parent, Ref<BinaryView> diffBv)
+    : QWidget(parent), m_diffBv(diffBv)
+{
+    init(bifrostDiffFromBinaryView(diffBv));
+}
+
+QFont BifrostDiffView::getFont()
+{
+    return getMonospaceFont(this);
+}
+
+void BifrostDiffView::init(Ref<Metadata> diffData)
+{
+    // Register the widget↔View mapping so View::getViewFromWidget resolves
+    // when BN opens this as a diff database's view.
+    setupView(this);
+
     // Parse binary names so we can resolve BVs.
     if (diffData && diffData->IsKeyValueStore())
     {
@@ -506,4 +529,31 @@ void BifrostDiffView::highlightInstructionDiffs(Ref<Function> lf, Ref<Function> 
         if (normLine(ll[i]) != normLine(rl[i])) { hlLeft(ll[i].addr); hlRight(rl[i].addr); }
     for (size_t i = shared; i < ll.size(); ++i) hlLeft(ll[i].addr);
     for (size_t i = shared; i < rl.size(); ++i) hlRight(rl[i].addr);
+}
+
+// ── BifrostDiffViewType ───────────────────────────────────────────────────────
+
+BifrostDiffViewType* BifrostDiffViewType::m_instance = nullptr;
+
+BifrostDiffViewType::BifrostDiffViewType()
+    : ViewType("BifrostDiff", "Bifrost Diff")
+{
+}
+
+int BifrostDiffViewType::getPriority(Ref<BinaryView> data, const QString& /* filename */)
+{
+    // Claim only databases that actually carry a diff; every ordinary binary
+    // scores 0 and is left to the built-in view types.
+    return bifrostDiffFromBinaryView(data) ? 100 : 0;
+}
+
+QWidget* BifrostDiffViewType::create(Ref<BinaryView> data, ViewFrame* /* viewFrame */)
+{
+    return new BifrostDiffView(nullptr, data);
+}
+
+void BifrostDiffViewType::init()
+{
+    m_instance = new BifrostDiffViewType();
+    ViewType::registerViewType(m_instance);
 }

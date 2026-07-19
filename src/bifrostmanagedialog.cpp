@@ -1,4 +1,5 @@
 #include "bifrostmanagedialog.h"
+#include "bifrostdiffdb.h"
 #include "bifrostdiffstore.h"
 #include "bifrostdiffview.h"
 #include "bifrostexport.h"
@@ -58,7 +59,12 @@ BifrostManageDiffsDialog::BifrostManageDiffsDialog(QWidget* parent)
     m_openBtn   = new QPushButton("Open", this);
     m_exportBtn = new QPushButton("Export…", this);
     m_deleteBtn = new QPushButton("Delete…", this);
+    m_saveToProjectBtn = new QPushButton("Save to Project", this);
+    m_saveToProjectBtn->setToolTip(
+        "Write this diff into the project as a .bndb file, so it appears in the\n"
+        "project browser and opens with a double-click like a binary");
     btnRow->addWidget(m_openBtn);
+    btnRow->addWidget(m_saveToProjectBtn);
     btnRow->addWidget(m_exportBtn);
     btnRow->addWidget(m_deleteBtn);
     btnRow->addStretch(1);
@@ -69,6 +75,8 @@ BifrostManageDiffsDialog::BifrostManageDiffsDialog(QWidget* parent)
     connect(m_list, &QListWidget::itemSelectionChanged, this, &BifrostManageDiffsDialog::updateButtons);
     connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { openSelected(); });
     connect(m_openBtn,   &QPushButton::clicked, this, &BifrostManageDiffsDialog::openSelected);
+    connect(m_saveToProjectBtn, &QPushButton::clicked, this,
+            &BifrostManageDiffsDialog::saveSelectedToProject);
     connect(m_exportBtn, &QPushButton::clicked, this, &BifrostManageDiffsDialog::exportSelected);
     connect(m_deleteBtn, &QPushButton::clicked, this, &BifrostManageDiffsDialog::deleteSelected);
     connect(closeBtn,    &QPushButton::clicked, this, &QDialog::accept);
@@ -103,8 +111,43 @@ void BifrostManageDiffsDialog::updateButtons()
 {
     bool hasSelection = m_list->currentItem() != nullptr;
     m_openBtn->setEnabled(hasSelection);
+    m_saveToProjectBtn->setEnabled(hasSelection);
     m_exportBtn->setEnabled(hasSelection);
     m_deleteBtn->setEnabled(hasSelection);
+}
+
+void BifrostManageDiffsDialog::saveSelectedToProject()
+{
+    auto* item = m_list->currentItem();
+    if (!item) return;
+    QString name = item->data(RoleDiffName).toString();
+
+    Ref<Project> project = currentProject();
+    if (!project) return;
+
+    auto diffData = bifrostLoadDiff(name.toStdString(), project);
+    if (!diffData)
+    {
+        QMessageBox::warning(this, "Save to project", "Could not load the selected diff.");
+        return;
+    }
+
+    std::string error;
+    if (!bifrostSaveDiffToProject(name.toStdString(), diffData, project, error))
+    {
+        QMessageBox::warning(this, "Save to project",
+                             QString("Could not save the diff: %1")
+                                 .arg(QString::fromStdString(error)));
+        return;
+    }
+
+    QMessageBox::information(
+        this, "Save to project",
+        QString("Saved as \"%1.bndb\" in the project.\n\n"
+                "It now appears in the project browser and opens with a "
+                "double-click. The two binaries stay as their own project "
+                "entries — the diff file holds no binary image.")
+            .arg(name));
 }
 
 void BifrostManageDiffsDialog::openSelected()
