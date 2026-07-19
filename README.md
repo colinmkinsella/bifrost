@@ -16,6 +16,7 @@ Binary diffing tools like [BinDiff](https://github.com/google/bindiff) and [Diap
 - **Side-by-side diff view** with a Linear/Graph toggle for a control-flow-graph comparison, driven from a results sidebar
 - **Guided walkthrough**: filter to changed/added/removed, step through changes with the *Prev*/*Next* buttons (F8 / Shift+F8)
 - Diffs are computed on a **background thread** and **saved into the Binary Ninja project** metadata, so they persist across sessions
+- **Manage saved diffs** (Plugins ▸ Bifrost ▸ Manage Diffs…): open, delete, or **export** a diff to **JSON** (for tooling) or a self-contained **HTML** report
 - Also includes the original side-by-side **split view** (`ViewType` "Bifrost", priority 25) for keeping two panes in sync
 
 ## Diffing workflow

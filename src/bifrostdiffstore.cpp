@@ -2,16 +2,11 @@
 
 using namespace BinaryNinja;
 
-bool bifrostSaveDiff(const std::string& diffName,
-                     const std::string& leftBinaryName,
-                     const std::string& rightBinaryName,
-                     const std::string& timestamp,
-                     const std::vector<DiffFuncEntry>& entries,
-                     Ref<Project> project)
+Ref<Metadata> bifrostBuildDiffMetadata(const std::string& leftBinaryName,
+                                       const std::string& rightBinaryName,
+                                       const std::string& timestamp,
+                                       const std::vector<DiffFuncEntry>& entries)
 {
-    if (!project || !project->IsOpen())
-        return false;
-
     // Build the per-function array
     std::vector<Ref<Metadata>> funcArray;
     funcArray.reserve(entries.size());
@@ -51,8 +46,21 @@ bool bifrostSaveDiff(const std::string& diffName,
     root["right"]     = new Metadata(rightBinaryName);
     root["timestamp"] = new Metadata(timestamp);
     root["functions"] = new Metadata(funcArray);
+    return new Metadata(root);
+}
 
-    project->StoreMetadata(diffMetaKey(diffName), new Metadata(root));
+bool bifrostSaveDiff(const std::string& diffName,
+                     const std::string& leftBinaryName,
+                     const std::string& rightBinaryName,
+                     const std::string& timestamp,
+                     const std::vector<DiffFuncEntry>& entries,
+                     Ref<Project> project)
+{
+    if (!project || !project->IsOpen())
+        return false;
+
+    project->StoreMetadata(diffMetaKey(diffName),
+        bifrostBuildDiffMetadata(leftBinaryName, rightBinaryName, timestamp, entries));
 
     // Update index — read existing, add if not present
     std::vector<std::string> names = bifrostListDiffs(project);

@@ -1,9 +1,11 @@
 #include "bifrostmanagedialog.h"
 #include "bifrostdiffstore.h"
 #include "bifrostdiffview.h"
+#include "bifrostexport.h"
 #include "uicontext.h"
 
 #include <QtWidgets/QDialogButtonBox>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QMessageBox>
@@ -54,8 +56,10 @@ BifrostManageDiffsDialog::BifrostManageDiffsDialog(QWidget* parent)
 
     auto* btnRow = new QHBoxLayout();
     m_openBtn   = new QPushButton("Open", this);
+    m_exportBtn = new QPushButton("Export…", this);
     m_deleteBtn = new QPushButton("Delete…", this);
     btnRow->addWidget(m_openBtn);
+    btnRow->addWidget(m_exportBtn);
     btnRow->addWidget(m_deleteBtn);
     btnRow->addStretch(1);
     auto* closeBtn = new QPushButton("Close", this);
@@ -65,6 +69,7 @@ BifrostManageDiffsDialog::BifrostManageDiffsDialog(QWidget* parent)
     connect(m_list, &QListWidget::itemSelectionChanged, this, &BifrostManageDiffsDialog::updateButtons);
     connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { openSelected(); });
     connect(m_openBtn,   &QPushButton::clicked, this, &BifrostManageDiffsDialog::openSelected);
+    connect(m_exportBtn, &QPushButton::clicked, this, &BifrostManageDiffsDialog::exportSelected);
     connect(m_deleteBtn, &QPushButton::clicked, this, &BifrostManageDiffsDialog::deleteSelected);
     connect(closeBtn,    &QPushButton::clicked, this, &QDialog::accept);
 
@@ -98,6 +103,7 @@ void BifrostManageDiffsDialog::updateButtons()
 {
     bool hasSelection = m_list->currentItem() != nullptr;
     m_openBtn->setEnabled(hasSelection);
+    m_exportBtn->setEnabled(hasSelection);
     m_deleteBtn->setEnabled(hasSelection);
 }
 
@@ -118,6 +124,44 @@ void BifrostManageDiffsDialog::openSelected()
     auto* view = new BifrostDiffView(nullptr, diffData, tabTitle);
     ctx->createTabForWidget(tabTitle, view);
     accept();
+}
+
+void BifrostManageDiffsDialog::exportSelected()
+{
+    auto* item = m_list->currentItem();
+    if (!item) return;
+    QString name = item->data(RoleDiffName).toString();
+
+    Ref<Project> project = currentProject();
+    if (!project) return;
+    auto diffData = bifrostLoadDiff(name.toStdString(), project);
+    if (!diffData)
+    {
+        QMessageBox::warning(this, "Export diff", "Could not load the selected diff.");
+        return;
+    }
+
+    QString selectedFilter;
+    QString path = QFileDialog::getSaveFileName(
+        this, "Export diff", name + ".html",
+        "HTML report (*.html);;JSON (*.json)", &selectedFilter);
+    if (path.isEmpty()) return;
+
+    // Decide the format from the chosen filter, then the extension.
+    bool json = selectedFilter.contains("json", Qt::CaseInsensitive)
+             || path.endsWith(".json", Qt::CaseInsensitive);
+    if (json && !path.endsWith(".json", Qt::CaseInsensitive)) path += ".json";
+    if (!json && !path.endsWith(".html", Qt::CaseInsensitive)) path += ".html";
+
+    bool ok = json ? bifrost::exportDiffJson(diffData, path.toStdString())
+                   : bifrost::exportDiffHtml(diffData, path.toStdString());
+
+    if (ok)
+        QMessageBox::information(this, "Export diff",
+            QString("Exported to:\n%1").arg(path));
+    else
+        QMessageBox::warning(this, "Export diff",
+            QString("Failed to write:\n%1").arg(path));
 }
 
 void BifrostManageDiffsDialog::deleteSelected()

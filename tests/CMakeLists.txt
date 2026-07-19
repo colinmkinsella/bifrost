@@ -31,7 +31,9 @@ add_executable(diff_harness
     harness/diff_harness.cpp
     ${CMAKE_SOURCE_DIR}/src/bifrostfeatures.cpp
     ${CMAKE_SOURCE_DIR}/src/bifrostmatch.cpp
-    ${CMAKE_SOURCE_DIR}/src/bifrostdiffengine.cpp)
+    ${CMAKE_SOURCE_DIR}/src/bifrostdiffengine.cpp
+    ${CMAKE_SOURCE_DIR}/src/bifrostdiffstore.cpp
+    ${CMAKE_SOURCE_DIR}/src/bifrostexport.cpp)
 target_include_directories(diff_harness PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(diff_harness binaryninjaapi)
 if(NOT WIN32)

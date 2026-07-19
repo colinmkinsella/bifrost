@@ -15,6 +15,7 @@ class BifrostManageDiffsDialog : public QDialog
 
     QListWidget* m_list;
     QPushButton* m_openBtn;
+    QPushButton* m_exportBtn;
     QPushButton* m_deleteBtn;
 
     void refresh();
@@ -25,5 +26,6 @@ public:
 
 private Q_SLOTS:
     void openSelected();
+    void exportSelected();
     void deleteSelected();
 };

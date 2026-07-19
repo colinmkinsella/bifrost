@@ -64,6 +64,14 @@ struct DiffFuncEntry
     std::vector<DiffBbEntry> blocks;
 };
 
+// Build the Metadata tree (schema v2) for a diff, without storing it. Shared by
+// bifrostSaveDiff and by tests/tools that need the on-disk shape.
+BinaryNinja::Ref<BinaryNinja::Metadata> bifrostBuildDiffMetadata(
+    const std::string& leftBinaryName,
+    const std::string& rightBinaryName,
+    const std::string& timestamp,
+    const std::vector<DiffFuncEntry>& entries);
+
 // Save diff to project metadata. Returns false if no project is open.
 bool bifrostSaveDiff(const std::string& diffName,
                      const std::string& leftBinaryName,

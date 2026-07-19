@@ -11,9 +11,13 @@
 #include "binaryninjaapi.h"
 
 #include "bifrostdiffengine.h"
+#include "bifrostdiffstore.h"
+#include "bifrostexport.h"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 using namespace BinaryNinja;
@@ -128,6 +132,31 @@ int main(int argc, char** argv)
     const bifrost::FuncMatch* a2 = byRight(fns, "rotate_left32");
     check(a1 && a1->status == bifrost::MatchStatus::Added, "popcount32 is Added");
     check(a2 && a2->status == bifrost::MatchStatus::Added, "rotate_left32 is Added");
+
+    // Export: build the on-disk metadata shape and run the JSON/HTML exporters.
+    std::cout << "export:\n";
+    auto meta = bifrostBuildDiffMetadata("target_v1", "target_v2", "harness",
+                                         bifrost::toStoreEntries(diff));
+    const std::string jsonPath = "/tmp/bifrost_diff.json";
+    const std::string htmlPath = "/tmp/bifrost_diff.html";
+    bool je = bifrost::exportDiffJson(meta, jsonPath);
+    bool he = bifrost::exportDiffHtml(meta, htmlPath);
+    check(je, "JSON export written");
+    check(he, "HTML export written");
+
+    auto slurp = [](const std::string& p) {
+        std::ifstream f(p);
+        std::stringstream ss; ss << f.rdbuf(); return ss.str();
+    };
+    std::string js = slurp(jsonPath), hs = slurp(htmlPath);
+    check(js.find("\"functions\"") != std::string::npos
+          && js.find("find_pattern") != std::string::npos
+          && js.find("\"summary\"") != std::string::npos,
+          "JSON has functions/summary/known name");
+    check(hs.find("<table") != std::string::npos
+          && hs.find("find_pattern") != std::string::npos
+          && hs.find("changed") != std::string::npos,
+          "HTML has table/known name/status");
 
     std::cout << (fail ? "\nRESULT: FAILED\n" : "\nRESULT: PASSED\n");
     return fail ? 1 : 0;
