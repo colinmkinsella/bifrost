@@ -85,23 +85,6 @@ void Matcher::MatchBlocks(const FuncFeatures& l, const FuncFeatures& r, FuncMatc
         }
     }
 
-    // Pass A2 — relayout hash → Identical. Catches blocks that render to the
-    // same instructions (same symbols + immediates) and differ only in the raw
-    // address operands that shift when code/data is laid out differently.
-    {
-        std::unordered_map<uint64_t, std::vector<size_t>> rByReloc;
-        for (size_t ri = 0; ri < nR; ++ri)
-            if (!rUsed[ri] && r.blocks[ri].relayoutHash) rByReloc[r.blocks[ri].relayoutHash].push_back(ri);
-        for (size_t li = 0; li < nL; ++li)
-        {
-            if (lUsed[li] || !l.blocks[li].relayoutHash) continue;
-            auto it = rByReloc.find(l.blocks[li].relayoutHash);
-            if (it == rByReloc.end()) continue;
-            for (size_t ri : it->second)
-                if (!rUsed[ri]) { addMatch(li, ri, MatchStatus::Identical); break; }
-        }
-    }
-
     // Pass B — normalized mnemonic skeleton → Changed.
     {
         std::unordered_map<std::string, std::vector<size_t>> rBySig;
@@ -155,12 +138,7 @@ void Matcher::MatchBlocks(const FuncFeatures& l, const FuncFeatures& r, FuncMatc
     double edgeSim = 1.0 - std::fabs((double)l.edges - (double)r.edges) / maxEdges;
     out.similarity = 0.8 * bbSim + 0.2 * edgeSim;
 
-    // A function is identical if every block matched identically (exact bytes or
-    // only a relocation difference) with no added/removed blocks — this treats a
-    // function that merely moved (relocated) as unchanged, not "changed".
-    bool allBlocksIdentical = (nL > 0 && nL == nR
-                               && out.bbChanged == 0 && out.bbAdded == 0 && out.bbRemoved == 0);
-    if (l.byteHash == r.byteHash || allBlocksIdentical)
+    if (l.byteHash == r.byteHash)
     {
         out.status = MatchStatus::Identical;
         out.similarity = 1.0;
