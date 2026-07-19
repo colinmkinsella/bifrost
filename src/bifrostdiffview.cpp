@@ -368,12 +368,11 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
     if (!m_leftBv  && !m_leftBvName.isEmpty())  m_leftBv  = findBvByName(m_leftBvName);
     if (!m_rightBv && !m_rightBvName.isEmpty()) m_rightBv = findBvByName(m_rightBvName);
 
-    if (m_leftFrame  && leftAddr)  m_leftFrame->navigate(m_leftBv,  leftAddr);
-    if (m_rightFrame && rightAddr) m_rightFrame->navigate(m_rightBv, rightAddr);
-
     Ref<Function> lf = funcAtAddr(m_leftBv,  leftAddr);
     Ref<Function> rf = funcAtAddr(m_rightBv, rightAddr);
 
+    // Apply highlighting first so the view re-render it triggers can't undo the
+    // scroll — navigation is the last thing we do below.
     clearHighlights();
 
     // A matched pair (identical or changed) → per-block match highlighting.
@@ -393,6 +392,16 @@ void BifrostDiffView::navigateToEntry(uint64_t leftAddr, uint64_t rightAddr,
         for (auto& bb : rf->GetBasicBlocks()) bb->SetUserBasicBlockHighlight(GreenHighlightColor);
         m_prevRightFunc = rf;
     }
+
+    // Navigate both panes last. Prefer navigateToFunction (jumps to the function
+    // and centers it) and fall back to a raw address navigate.
+    auto go = [](ViewFrame* frame, Ref<BinaryView> bv, Ref<Function> fn, uint64_t addr) {
+        if (!frame || !addr) return;
+        if (fn) frame->navigateToFunction(fn, addr);
+        else    frame->navigate(bv, addr);
+    };
+    go(m_leftFrame,  m_leftBv,  lf, leftAddr);
+    go(m_rightFrame, m_rightBv, rf, rightAddr);
 }
 
 // ── Block highlighting ────────────────────────────────────────────────────────
