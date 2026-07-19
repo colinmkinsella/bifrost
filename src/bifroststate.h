@@ -2,7 +2,9 @@
 
 #include "binaryninjaapi.h"
 
+#include <algorithm>
 #include <functional>
+#include <utility>
 #include <vector>
 
 // Shared pane state updated by BifrostContainer / BifrostDiffView and read by
@@ -26,12 +28,30 @@ struct BifrostPaneState
     // Active diff metadata — set by BifrostDiffView or runDiff, read by sidebar.
     BinaryNinja::Ref<BinaryNinja::Metadata> activeDiffData;
 
-    // Observers notified when activeDiffData changes.
-    std::vector<std::function<void()>> diffObservers;
+    // Observers notified when activeDiffData changes, each keyed by its owner
+    // (the widget pointer) so it can be removed precisely on destruction — a
+    // stale observer firing on a freed widget is a use-after-free crash.
+    std::vector<std::pair<void*, std::function<void()>>> diffObservers;
+
+    void addDiffObserver(void* owner, std::function<void()> fn)
+    {
+        diffObservers.emplace_back(owner, std::move(fn));
+    }
+
+    void removeDiffObserver(void* owner)
+    {
+        diffObservers.erase(
+            std::remove_if(diffObservers.begin(), diffObservers.end(),
+                           [owner](const auto& p) { return p.first == owner; }),
+            diffObservers.end());
+    }
 
     void notifyDiffChanged()
     {
-        for (auto& fn : diffObservers)
+        // Copy first: an observer may add/remove observers (e.g. open a diff
+        // view) while we iterate.
+        auto snapshot = diffObservers;
+        for (auto& [owner, fn] : snapshot)
             if (fn) fn();
     }
 

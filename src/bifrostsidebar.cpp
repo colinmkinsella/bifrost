@@ -212,9 +212,10 @@ BifrostSidebarWidget::BifrostSidebarWidget(ViewFrame* /* frame */, Ref<BinaryVie
     connect(m_prevChangeBtn, &QPushButton::clicked, this, [this]() { stepChange(-1); });
     connect(m_nextChangeBtn, &QPushButton::clicked, this, [this]() { stepChange(+1); });
 
-    // Listen for diff data changes from BifrostDiffView.
+    // Listen for diff data changes from BifrostDiffView (keyed by `this` so it
+    // is removed precisely on destruction).
     auto& state = BifrostPaneState::instance();
-    state.diffObservers.push_back([this]() { loadDiffFromState(); });
+    state.addDiffObserver(this, [this]() { loadDiffFromState(); });
 
     populate();
     loadDiffFromState();
@@ -222,9 +223,9 @@ BifrostSidebarWidget::BifrostSidebarWidget(ViewFrame* /* frame */, Ref<BinaryVie
 
 BifrostSidebarWidget::~BifrostSidebarWidget()
 {
-    // Remove our observer — we stored exactly one at the back.
-    auto& obs = BifrostPaneState::instance().diffObservers;
-    if (!obs.empty()) obs.pop_back();
+    // Remove exactly our own observer so a later notify can't fire on us after
+    // we're destroyed (use-after-free).
+    BifrostPaneState::instance().removeDiffObserver(this);
 }
 
 // ── Diff list from state ──────────────────────────────────────────────────────
