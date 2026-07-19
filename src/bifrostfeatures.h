@@ -27,9 +27,12 @@ struct BbFeatures
     size_t      inDegree = 0;
     size_t      outDegree = 0;
     size_t      instrCount = 0;
-    uint64_t    byteHash = 0;     // exact bytes of the block
-    uint64_t    spp = 0;          // small-prime product of the block's mnemonics
-    std::string mnemonicSig;      // ordered normalized mnemonic skeleton
+    uint64_t    byteHash = 0;      // exact bytes of the block
+    uint64_t    relayoutHash = 0;  // tokens with only raw address operands masked
+                                   // (keeps immediates + symbol names) — matches
+                                   // when two versions differ only by relayout
+    uint64_t    spp = 0;           // small-prime product of the block's mnemonics
+    std::string mnemonicSig;       // ordered normalized mnemonic skeleton
 };
 
 // Per function features.

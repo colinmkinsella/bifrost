@@ -93,6 +93,14 @@ static bool isImmediateToken(BNInstructionTextTokenType t)
     }
 }
 
+// A raw address operand that shifts under relayout. Masking only these (not
+// symbol names, which identify *what* is called) keeps the signature from
+// falsely equating blocks that reference different things.
+static bool isRelayoutToken(const BinaryNinja::InstructionTextToken& tok)
+{
+    return tok.type == PossibleAddressToken || tok.type == CodeRelativeAddressToken;
+}
+
 // ── FeatureExtractor ────────────────────────────────────────────────────────
 
 FeatureExtractor::FeatureExtractor(Ref<BinaryView> bv)
@@ -147,7 +155,8 @@ static BbFeatures extractBlockFromLines(Ref<BinaryView> bv, Ref<BasicBlock> bb,
     }
 
     uint64_t spp = 1;
-    std::string sig;
+    std::string sig;      // mnemonicSig: masks immediates AND addresses
+    std::string relayout; // relayoutSig: masks only raw address operands
     for (auto& line : lines)
     {
         ++f.instrCount;
@@ -160,11 +169,18 @@ static BbFeatures extractBlockFromLines(Ref<BinaryView> bv, Ref<BasicBlock> bb,
                 sig += tok.text;
                 sig += ' ';
             }
+            // relayout keeps immediates and real symbol names, replacing only
+            // the address-encoding tokens (raw addresses + auto-names) with a
+            // placeholder so two versions that differ only by relayout match.
+            relayout += isRelayoutToken(tok) ? "@" : tok.text;
+            relayout += ' ';
         }
         sig += '\n';
+        relayout += '\n';
     }
     f.spp = spp;
     f.mnemonicSig = std::move(sig);
+    f.relayoutHash = Fnv1aStr(relayout);
     return f;
 }
 
