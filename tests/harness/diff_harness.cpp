@@ -46,17 +46,22 @@ static const bifrost::FuncMatch* byRight(const std::vector<bifrost::FuncMatch>& 
 
 int main(int argc, char** argv)
 {
-    if (argc != 3)
+    // Optional --stripped runs name-independent assertions (the inputs have no
+    // symbols, so functions are sub_<addr>).
+    bool stripped = false;
+    int argi = 1;
+    if (argc >= 2 && std::string(argv[1]) == "--stripped") { stripped = true; argi = 2; }
+    if (argc - argi != 2)
     {
-        std::cerr << "usage: " << argv[0] << " <v1.dylib> <v2.dylib>\n";
+        std::cerr << "usage: " << argv[0] << " [--stripped] <v1.dylib> <v2.dylib>\n";
         return 2;
     }
 
     SetBundledPluginDirectory(GetBundledPluginDirectory());
     InitPlugins();
 
-    Ref<BinaryView> a = Load(argv[1]);
-    Ref<BinaryView> b = Load(argv[2]);
+    Ref<BinaryView> a = Load(argv[argi]);
+    Ref<BinaryView> b = Load(argv[argi + 1]);
     if (!a || !b || a->GetTypeName() == "Raw" || b->GetTypeName() == "Raw")
     {
         std::cerr << "failed to load one or both inputs as executables\n";
@@ -101,6 +106,20 @@ int main(int argc, char** argv)
     };
 
     std::cout << "checks:\n";
+
+    if (stripped)
+    {
+        // No symbols at all — assert the structural outcome matches the named
+        // run: the exactly-2 added and 2 removed functions are still found, and
+        // the corresponding functions still pair up, purely by structure.
+        check(diff.added == 2,   "stripped: exactly 2 functions added (structural)");
+        check(diff.removed == 2, "stripped: exactly 2 functions removed (structural)");
+        check(diff.identical + diff.changed >= 6,
+              "stripped: >=6 functions matched without symbols");
+
+        std::cout << (fail ? "\nRESULT: FAILED\n" : "\nRESULT: PASSED\n");
+        return fail ? 1 : 0;
+    }
 
     // Unchanged functions should match.
     check(isMatched(byLeft(fns, "find_pattern")),  "find_pattern matches");

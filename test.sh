@@ -59,39 +59,51 @@ fi
 if [[ $DO_BUILD -eq 1 ]]; then
     echo
     info "====== Building fixtures + harness ======"
-    cmake --build "$BUILD_DIR" --target target_v1 target_v2 diff_harness -j "$NPROC" \
+    cmake --build "$BUILD_DIR" --target target_v1 target_v2 \
+          target_v1_stripped target_v2_stripped diff_harness -j "$NPROC" \
         || { fail "ERROR: build failed."; exit 1; }
 fi
 
+EXT="dylib"; [[ "$(uname)" != "Darwin" ]] && EXT="so"
 HARNESS="$BIN_DIR/diff_harness"
-V1="$BIN_DIR/libtarget_v1.dylib"
-V2="$BIN_DIR/libtarget_v2.dylib"
-[[ "$(uname)" != "Darwin" ]] && { V1="$BIN_DIR/libtarget_v1.so"; V2="$BIN_DIR/libtarget_v2.so"; }
+V1="$BIN_DIR/libtarget_v1.$EXT"
+V2="$BIN_DIR/libtarget_v2.$EXT"
+SV1="$BIN_DIR/libtarget_v1_stripped.$EXT"
+SV2="$BIN_DIR/libtarget_v2_stripped.$EXT"
 
-for f in "$HARNESS" "$V1" "$V2"; do
+for f in "$HARNESS" "$V1" "$V2" "$SV1" "$SV2"; do
     [[ -e "$f" ]] || { fail "ERROR: missing $f — run ./test.sh without --no-build."; exit 1; }
 done
 
-# ---------------------------------------------------------------------------
-# Run the headless diff harness
-# ---------------------------------------------------------------------------
-echo
-info "====== Running diff harness ======"
-set +e
-if [[ $VERBOSE -eq 1 ]]; then
-    "$HARNESS" "$V1" "$V2"
-    STATUS=$?
-else
-    # Drop Binary Ninja's analysis chatter; keep the summary + checks.
-    "$HARNESS" "$V1" "$V2" 2>&1 | grep -E "summary:|PASS|FAIL|RESULT"
-    STATUS=${PIPESTATUS[0]}
-fi
-set -e
+# Run one harness invocation, filtering chatter unless --verbose. Sets STATUS.
+run_harness() {
+    set +e
+    if [[ $VERBOSE -eq 1 ]]; then
+        "$HARNESS" "$@"
+        STATUS=$?
+    else
+        "$HARNESS" "$@" 2>&1 | grep -E "summary:|PASS|FAIL|RESULT"
+        STATUS=${PIPESTATUS[0]}
+    fi
+    set -e
+}
+
+OVERALL=0
 
 echo
-if [[ $STATUS -eq 0 ]]; then
+info "====== Diff harness: named binaries ======"
+run_harness "$V1" "$V2"
+[[ $STATUS -ne 0 ]] && OVERALL=1
+
+echo
+info "====== Diff harness: stripped binaries (symbol-independent) ======"
+run_harness --stripped "$SV1" "$SV2"
+[[ $STATUS -ne 0 ]] && OVERALL=1
+
+echo
+if [[ $OVERALL -eq 0 ]]; then
     success "====== All checks passed ======"
 else
-    fail "====== Tests FAILED (exit $STATUS) ======"
+    fail "====== Tests FAILED ======"
 fi
-exit $STATUS
+exit $OVERALL

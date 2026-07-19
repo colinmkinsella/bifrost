@@ -20,6 +20,19 @@ foreach(ver v1 v2)
         OUTPUT_NAME "target_${ver}"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/bin"
     )
+
+    # Stripped variant: hidden visibility exports nothing, and strip removes the
+    # local symbol table, so Binary Ninja sees the functions only as sub_<addr>.
+    # Used to prove the matcher is symbol-independent.
+    add_library(target_${ver}_stripped SHARED src/target_${ver}.c)
+    target_compile_options(target_${ver}_stripped PRIVATE
+        -O1 -fno-omit-frame-pointer -fvisibility=hidden -g)
+    set_target_properties(target_${ver}_stripped PROPERTIES
+        OUTPUT_NAME "target_${ver}_stripped"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/bin")
+    add_custom_command(TARGET target_${ver}_stripped POST_BUILD
+        COMMAND strip -x $<TARGET_FILE:target_${ver}_stripped>
+        COMMENT "Stripping local symbols from target_${ver}_stripped")
 endforeach()
 
 # Headless end-to-end test for the diff engine. Links the Binary Ninja API/core
