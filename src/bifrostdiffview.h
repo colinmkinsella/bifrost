@@ -51,6 +51,9 @@ class BifrostDiffView : public QWidget
     SplitPaneWidget* makeSplitPane(BinaryNinja::Ref<BinaryNinja::BinaryView> bv,
                                    ViewFrame*& frameOut);
     void initPanes();
+    // Re-resolve the binaries and rebuild both panes (used by the Reload button
+    // when the binaries are opened after the diff view).
+    void reloadPanes();
 
     // Switch both panes between the Linear and Graph view types.
     void setPaneViewType(bool graph);

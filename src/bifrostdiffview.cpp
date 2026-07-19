@@ -54,20 +54,44 @@ using namespace BinaryNinja;
     return QString::fromStdString((s != std::string::npos) ? p.substr(s + 1) : p);
 }
 
+// Strip common binary / database extensions so a diff saved against
+// "foo.dylib" still resolves when the user has "foo.bndb" open.
+static QString normalizeName(QString n)
+{
+    for (auto* ext : {".bndb", ".dylib", ".so", ".exe", ".dll", ".o", ".bin"})
+        n.remove(ext, Qt::CaseInsensitive);
+    return n;
+}
+
 Ref<BinaryView> BifrostDiffView::findBvByName(const QString& name) const
 {
-    auto matches = [&](Ref<BinaryView> bv) { return bv && bvDisplayName(bv) == name; };
+    const QString target = normalizeName(name);
+
+    // Score a candidate: 2 = analyzed view whose (extension-stripped) name
+    // matches, 1 = raw view match, 0 = no match. Preferring the analyzed view
+    // is what makes the panes show disassembly instead of a raw hex dump.
+    auto score = [&](Ref<BinaryView> bv) -> int {
+        if (!bv) return 0;
+        if (normalizeName(bvDisplayName(bv)) != target) return 0;
+        return (bv->GetTypeName() == "Raw") ? 1 : 2;
+    };
+
+    Ref<BinaryView> best;
+    int bestScore = 0;
+    auto consider = [&](Ref<BinaryView> bv) {
+        int s = score(bv);
+        if (s > bestScore) { bestScore = s; best = bv; }
+    };
 
     auto& state = BifrostPaneState::instance();
-    if (matches(state.leftData))  return state.leftData;
-    if (matches(state.rightData)) return state.rightData;
+    consider(state.leftData);
+    consider(state.rightData);
 
-    UIContext* ctx = UIContext::activeContext();
-    if (ctx)
+    if (UIContext* ctx = UIContext::activeContext())
         for (auto& [bv, _] : ctx->getAvailableBinaryViews())
-            if (matches(bv)) return bv;
+            consider(bv);
 
-    return nullptr;
+    return best;
 }
 
 static Ref<Function> funcAtAddr(Ref<BinaryView> bv, uint64_t addr)
@@ -126,9 +150,15 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
     m_graphToggle->setCheckable(true);
     m_graphToggle->setToolTip("Toggle both panes between Linear and Control-Flow Graph views");
     connect(m_graphToggle, &QPushButton::toggled, this, [this](bool on) { setPaneViewType(on); });
+
+    auto* reloadBtn = new QPushButton("Reload", this);
+    reloadBtn->setToolTip("Re-resolve and reload both binaries (use after opening them)");
+    connect(reloadBtn, &QPushButton::clicked, this, [this]() { reloadPanes(); });
+
     auto* header = new QHBoxLayout();
     header->setContentsMargins(4, 2, 4, 2);
     header->addWidget(m_graphToggle);
+    header->addWidget(reloadBtn);
     header->addStretch(1);
     outerLayout->addLayout(header);
 
@@ -201,7 +231,19 @@ void BifrostDiffView::initPanes()
         {
             widgetOut = makeSplitPane(bv, frameOut);
             if (widgetOut)
+            {
                 replacement = widgetOut;
+                // Point the frame at the analyzed view's first function so it
+                // opens on disassembly rather than a raw hex dump.
+                if (frameOut)
+                {
+                    uint64_t addr = 0;
+                    auto funcs = bv->GetAnalysisFunctionList();
+                    if (!funcs.empty()) addr = funcs[0]->GetStart();
+                    else                addr = bv->GetEntryPoint();
+                    frameOut->navigate(bv, addr);
+                }
+            }
         }
         if (!replacement)
         {
@@ -240,6 +282,14 @@ void BifrostDiffView::initPanes()
     // Restore the graph/linear mode on freshly-built frames.
     if (m_graphMode)
         setPaneViewType(true);
+}
+
+void BifrostDiffView::reloadPanes()
+{
+    // Force a fresh resolution (the binaries may have been opened since).
+    m_leftBv  = findBvByName(m_leftBvName);
+    m_rightBv = findBvByName(m_rightBvName);
+    initPanes();
 }
 
 void BifrostDiffView::setPaneViewType(bool graph)
