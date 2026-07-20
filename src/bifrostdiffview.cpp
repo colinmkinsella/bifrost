@@ -130,14 +130,31 @@ bool BifrostDiffView::sideHighlightSafe(ViewFrame* frame, Ref<BinaryView> bv) co
     return cur && cur->getCurrentWidget() != nullptr;
 }
 
-SplitPaneWidget* BifrostDiffView::makeSplitPane(Ref<BinaryView> bv, ViewFrame*& frameOut)
+SplitPaneWidget* BifrostDiffView::makeSplitPane(Ref<BinaryView> bv, ViewFrame*& frameOut,
+                                                FileContext*& fcOut)
 {
     FileContext* fc = fileContextForBv(bv);
     if (!fc) return nullptr;
 
     frameOut = new ViewFrame(m_frameSplit, fc, "Linear");
+    fcOut    = fc;
     auto* pane = new ViewPane(frameOut);
     return new SplitPaneWidget(pane, fc);
+}
+
+/*static*/ void BifrostDiffView::detachFrame(ViewFrame*& frame, FileContext*& fc)
+{
+    if (frame && fc)
+    {
+        fc->removeFrame(frame);
+        // removeFrame does not necessarily clear the current-frame pointer, and
+        // leaving it pointing at a frame Qt is about to delete is exactly the
+        // dangling-pointer crash this exists to prevent.
+        if (fc->getCurrentViewFrame() == frame)
+            fc->setCurrentViewFrame(nullptr);
+    }
+    frame = nullptr;
+    fc    = nullptr;
 }
 
 // ── Construction ──────────────────────────────────────────────────────────────
@@ -281,6 +298,13 @@ BifrostDiffView::~BifrostDiffView()
 {
     clearHighlights();
 
+    // Detach our panes from their FileContexts while the frames are still
+    // alive. This must happen here, in the derived destructor body, because Qt
+    // deletes our child widgets afterwards — and a FileContext left pointing at
+    // a deleted frame is a use-after-free on the next highlight.
+    detachFrame(m_leftFrame,  m_leftFc);
+    detachFrame(m_rightFrame, m_rightFc);
+
     // Clear our own callbacks/diff (owner-guarded so we never wipe another diff
     // view's state), then let the sidebar refresh from whatever is active now.
     auto& state = BifrostPaneState::instance();
@@ -322,6 +346,7 @@ void BifrostDiffView::initPanes()
     // a new ViewFrame was created for this side.
     auto buildSide = [&](Ref<BinaryView> bv, const QString& bvName,
                          ViewFrame*& frameOut, SplitPaneWidget*& widgetOut,
+                         FileContext*& fcOut,
                          int splitterIndex) -> bool
     {
         if (frameOut) return false;   // already built — leave it alone
@@ -330,7 +355,7 @@ void BifrostDiffView::initPanes()
         bool built = false;
         if (bv)
         {
-            widgetOut = makeSplitPane(bv, frameOut);
+            widgetOut = makeSplitPane(bv, frameOut, fcOut);
             if (widgetOut)
             {
                 replacement = widgetOut;
@@ -365,8 +390,10 @@ void BifrostDiffView::initPanes()
         return built;
     };
 
-    bool builtLeft  = buildSide(m_leftBv,  m_leftBvName,  m_leftFrame,  m_leftWidget,  0);
-    bool builtRight = buildSide(m_rightBv, m_rightBvName, m_rightFrame, m_rightWidget, 1);
+    bool builtLeft  = buildSide(m_leftBv,  m_leftBvName,  m_leftFrame,
+                                m_leftWidget,  m_leftFc,  0);
+    bool builtRight = buildSide(m_rightBv, m_rightBvName, m_rightFrame,
+                                m_rightWidget, m_rightFc, 1);
 
     // Kick ViewPaneHeaders to install the IL-level subtype widget (new frames only).
     auto connectKick = [](ViewFrame* frame, SplitPaneWidget* w) {

@@ -36,6 +36,22 @@ class BifrostDiffView : public QWidget, public View
     SplitPaneWidget* m_leftWidget  = nullptr;
     SplitPaneWidget* m_rightWidget = nullptr;
 
+    // The FileContext each pane's frame was created against. Kept so the frame
+    // can be detached from it before Qt destroys our widget tree — see
+    // detachFrame for why that is not optional.
+    FileContext* m_leftFc  = nullptr;
+    FileContext* m_rightFc = nullptr;
+
+    // Detach a pane's ViewFrame from its FileContext and forget both.
+    //
+    // We construct these ViewFrames ourselves, outside BN's tab machinery, so
+    // nothing informs the FileContext when Qt destroys our widget tree. It
+    // holds a raw m_currentViewFrame pointer, which is then left dangling, and
+    // the next user-highlight makes BN dereference the freed frame — observed
+    // as a QWidget* whose bytes were reused JSON text, crashing in
+    // ViewFrame::getTypeForView.
+    static void detachFrame(ViewFrame*& frame, FileContext*& fc);
+
     BinaryNinja::Ref<BinaryNinja::BinaryView> m_leftBv;
     BinaryNinja::Ref<BinaryNinja::BinaryView> m_rightBv;
     QString m_leftBvName;
@@ -88,7 +104,8 @@ class BifrostDiffView : public QWidget, public View
                            BinaryNinja::Ref<BinaryNinja::BinaryView> bv) const;
 
     SplitPaneWidget* makeSplitPane(BinaryNinja::Ref<BinaryNinja::BinaryView> bv,
-                                   ViewFrame*& frameOut);
+                                   ViewFrame*& frameOut,
+                                   FileContext*& fcOut);
     void initPanes();
     // Open any still-missing binaries from the project (async) and schedule a
     // bounded retry of initPanes so their panes appear once loaded.
