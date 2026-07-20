@@ -44,6 +44,13 @@ class BifrostDiffView : public QWidget, public View
     // The diff this view shows, kept so the view can re-register itself as the
     // active diff whenever its tab is shown (so multiple diff views coexist).
     BinaryNinja::Ref<BinaryNinja::Metadata> m_diffData;
+    QString m_diffName;
+
+    // Bind BN's File▸Save to "write this diff into the project as a .bndb".
+    // Only done for a diff opened as a plain tab — one opened FROM a .bndb is
+    // already a project file, and BN's own save should keep handling it.
+    void bindSaveAction();
+    void saveDiffToProject();
 
     // Register this view as the active diff driver (nav callbacks + diff data).
     void registerActive();
@@ -89,6 +96,8 @@ class BifrostDiffView : public QWidget, public View
     static QString normalizeName(QString n);
 
 public:
+    // `diffName` is the diff's stored name (not the tab title) — it is the name
+    // used if the diff is later saved into the project as "<diffName>.bndb".
     explicit BifrostDiffView(QWidget* parent,
                              BinaryNinja::Ref<BinaryNinja::Metadata> diffData,
                              const QString& diffName);

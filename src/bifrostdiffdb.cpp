@@ -40,6 +40,17 @@ bool bifrostSaveDiffToProject(const std::string& diffName,
         return false;
     }
 
+    // Adding the same name twice would silently pile up duplicate project
+    // entries (nothing keys project files by name), so refuse instead.
+    const std::string fileName = diffName + ".bndb";
+    for (auto& pf : project->GetFiles())
+        if (pf && pf->GetName() == fileName)
+        {
+            errorOut = "\"" + fileName + "\" is already in the project; "
+                       "delete it there first to replace it";
+            return false;
+        }
+
     // Use the diff's JSON as the database's raw contents so the file still says
     // something useful if it's inspected outside Binary Ninja. The diff itself
     // is carried as metadata below — that's what actually round-trips.
@@ -88,7 +99,7 @@ bool bifrostSaveDiffToProject(const std::string& diffName,
     }
 
     Ref<ProjectFile> pf = project->CreateFileFromPath(
-        tmp.string(), nullptr, diffName + ".bndb",
+        tmp.string(), nullptr, fileName,
         "Bifrost diff: " + diffName);
 
     std::filesystem::remove(tmp, ec);   // best effort

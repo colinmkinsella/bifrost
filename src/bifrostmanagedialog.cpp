@@ -164,7 +164,7 @@ void BifrostManageDiffsDialog::openSelected()
     if (!diffData) return;
 
     QString tabTitle = QString("Diff: %1").arg(name);
-    auto* view = new BifrostDiffView(nullptr, diffData, tabTitle);
+    auto* view = new BifrostDiffView(nullptr, diffData, name);
     ctx->createTabForWidget(tabTitle, view);
     accept();
 }

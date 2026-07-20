@@ -3,14 +3,17 @@
 #include "bifrostdiffstore.h"
 #include "bifrostfeatures.h"
 #include "bifrostmatch.h"
+#include "action.h"
 #include "filecontext.h"
 #include "fontsettings.h"
 #include "pane.h"
 #include "uicontext.h"
 
+#include <QtCore/QStringList>
 #include <QtCore/QTimer>
 #include <QtGui/QShowEvent>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QVBoxLayout>
 
@@ -141,8 +144,8 @@ SplitPaneWidget* BifrostDiffView::makeSplitPane(Ref<BinaryView> bv, ViewFrame*& 
 
 BifrostDiffView::BifrostDiffView(QWidget* parent,
                                   Ref<Metadata> diffData,
-                                  const QString& /* diffName */)
-    : QWidget(parent)
+                                  const QString& diffName)
+    : QWidget(parent), m_diffName(diffName)
 {
     init(diffData);
 }
@@ -151,6 +154,7 @@ BifrostDiffView::BifrostDiffView(QWidget* parent,
 BifrostDiffView::BifrostDiffView(QWidget* parent, Ref<BinaryView> diffBv)
     : QWidget(parent), m_diffBv(diffBv)
 {
+    m_diffName = normalizeName(bvDisplayName(diffBv));
     init(bifrostDiffFromBinaryView(diffBv));
 }
 
@@ -204,12 +208,73 @@ void BifrostDiffView::init(Ref<Metadata> diffData)
     m_diffData = diffData;
     registerActive();
 
+    bindSaveAction();
+
     // Defer pane creation until after createTabForWidget has parented us.
     QTimer::singleShot(0, this, [this]() {
         initPanes();
         // Notify sidebar now that panes are ready.
         BifrostPaneState::instance().notifyDiffChanged();
     });
+}
+
+void BifrostDiffView::bindSaveAction()
+{
+    // A diff opened FROM a .bndb is already a project file — leave File▸Save
+    // alone there so BN keeps saving the database itself.
+    if (m_diffBv)
+        return;
+
+    // BN registers its File▸Save action inside the closed-source UI, so resolve
+    // the name at runtime instead of hard-coding a guess. Binding on this
+    // view's own handler means it only applies while the diff view has focus.
+    const std::set<QString> registered = UIAction::getAllRegisteredActions();
+
+    QStringList bound;
+    for (const QString& name : {QStringLiteral("Save File"), QStringLiteral("Save")})
+    {
+        if (!registered.count(name))
+            continue;
+        m_actionHandler.bindAction(name, UIAction(
+            [this](const UIActionContext&) { saveDiffToProject(); },
+            [this](const UIActionContext&) -> bool { return m_diffData != nullptr; }));
+        bound << name;
+    }
+
+    // Logged so a name mismatch is diagnosable from the log rather than
+    // presenting as "Save silently does nothing".
+    if (bound.isEmpty())
+        LogWarn("Bifrost: no save action matched; File>Save will not save the diff");
+    else
+        LogInfo("Bifrost: diff view bound save action(s): %s",
+                qPrintable(bound.join(", ")));
+}
+
+void BifrostDiffView::saveDiffToProject()
+{
+    if (!m_diffData)
+        return;
+
+    UIContext* ctx       = UIContext::activeContext();
+    Ref<Project> project = ctx ? ctx->getProject() : nullptr;
+    if (!project || !project->IsOpen())
+    {
+        QMessageBox::warning(this, "Bifrost", "No project is open.");
+        return;
+    }
+
+    QString name = m_diffName.isEmpty() ? QString("diff") : m_diffName;
+
+    std::string error;
+    if (!bifrostSaveDiffToProject(name.toStdString(), m_diffData, project, error))
+    {
+        QMessageBox::warning(this, "Bifrost",
+                             QString("Could not save the diff: %1")
+                                 .arg(QString::fromStdString(error)));
+        return;
+    }
+
+    LogInfo("Bifrost: saved diff \"%s\" into the project", qPrintable(name));
 }
 
 BifrostDiffView::~BifrostDiffView()
