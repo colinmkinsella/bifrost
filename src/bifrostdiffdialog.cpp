@@ -1,4 +1,5 @@
 #include "bifrostdiffdialog.h"
+#include "bifrostdiffdb.h"
 #include "bifrostdiffengine.h"
 #include "bifrostdiffstore.h"
 #include "bifrostdiffview.h"
@@ -9,6 +10,7 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QFormLayout>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
 
@@ -78,6 +80,15 @@ BifrostDiffDialog::BifrostDiffDialog(QWidget* parent)
     form->addRow("Left binary:",  m_leftCombo);
     form->addRow("Right binary:", m_rightCombo);
     form->addRow("Diff name:",    m_diffNameEdit);
+
+    // Off by default: every run would otherwise add another project entry.
+    m_saveToProjectCheck = new QCheckBox("Save to project as a .bndb file", this);
+    m_saveToProjectCheck->setToolTip(
+        "Also write the diff into the project as \"<name>.bndb\", so it appears in\n"
+        "the project browser and opens with a double-click. The file holds no\n"
+        "binary image — just the diff (a few KB).");
+    form->addRow(QString(), m_saveToProjectCheck);
+
     layout->addLayout(form);
 
     m_statusLabel = new QLabel(this);
@@ -173,10 +184,13 @@ void BifrostDiffDialog::onRunClicked()
     // Run on a worker thread; the callback fires on the main thread. The save
     // and view-open proceed even if the dialog was closed meanwhile; only the
     // dialog's own widgets are touched behind the QPointer guard.
+    // Read the checkbox now — the dialog may be gone by the time this finishes.
+    const bool saveToProject = m_saveToProjectCheck->isChecked();
+
     QPointer<BifrostDiffDialog> self = this;
     bifrost::ComputeAsync(
         leftBv, rightBv,
-        [self, diffName, leftName, rightName](bifrost::DiffResult diff) {
+        [self, diffName, leftName, rightName, saveToProject](bifrost::DiffResult diff) {
             UIContext* ctx       = UIContext::activeContext();
             Ref<Project> project = ctx ? ctx->getProject() : nullptr;
             if (!project || !project->IsOpen())
@@ -191,8 +205,21 @@ void BifrostDiffDialog::onRunClicked()
                                         .toString(Qt::ISODate).toStdString();
             bifrostSaveDiff(diffName, leftName, rightName, timestamp, entries, project);
 
-            // Automatically open the diff view.
             auto diffData = bifrostLoadDiff(diffName, project);
+
+            // Optionally also publish it as a .bndb entry in the project browser.
+            if (saveToProject && diffData)
+            {
+                std::string error;
+                if (!bifrostSaveDiffToProject(diffName, diffData, project, error))
+                    QMessageBox::warning(
+                        nullptr, "Bifrost",
+                        QString("The diff ran and was saved to the project, but it "
+                                "could not be written as a .bndb file: %1")
+                            .arg(QString::fromStdString(error)));
+            }
+
+            // Automatically open the diff view.
             if (diffData && ctx)
             {
                 QString tabTitle = QString("Diff: %1").arg(QString::fromStdString(diffName));

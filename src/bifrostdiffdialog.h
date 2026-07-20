@@ -2,6 +2,7 @@
 
 #include "binaryninjaapi.h"
 
+#include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QLabel>
@@ -9,6 +10,8 @@
 
 // Modal dialog that lets the user pick a left and right binary from the open
 // project, then runs the diff and saves it to the project metadata database.
+// Optionally also writes the diff into the project as a .bndb file, so it shows
+// up in the project browser next to the binaries (see bifrostdiffdb.h).
 class BifrostDiffDialog : public QDialog
 {
     Q_OBJECT
@@ -16,6 +19,7 @@ class BifrostDiffDialog : public QDialog
     QComboBox*  m_leftCombo;
     QComboBox*  m_rightCombo;
     QLineEdit*  m_diffNameEdit;
+    QCheckBox*  m_saveToProjectCheck;
     QLabel*     m_statusLabel;
 
     // Parallel list of project files populated into the combo boxes
