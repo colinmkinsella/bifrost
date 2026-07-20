@@ -60,10 +60,27 @@ using namespace BinaryNinja;
 
 // Strip common binary / database extensions so a diff saved against
 // "foo.dylib" still resolves when the user has "foo.bndb" open.
+//
+// Trailing extensions only, and repeatedly, so "foo.dylib.bndb" and "foo.dylib"
+// both reduce to "foo". This used to use QString::remove, which deletes the
+// substring ANYWHERE in the name — "a.out" became "aut" and "libssl.so.1"
+// became "libssl.1" — silently merging binaries that are actually distinct.
 /*static*/ QString BifrostDiffView::normalizeName(QString n)
 {
-    for (auto* ext : {".bndb", ".dylib", ".so", ".exe", ".dll", ".o", ".bin"})
-        n.remove(ext, Qt::CaseInsensitive);
+    for (bool stripped = true; stripped; )
+    {
+        stripped = false;
+        for (auto ext : {QLatin1String(".bndb"), QLatin1String(".dylib"),
+                         QLatin1String(".so"),   QLatin1String(".exe"),
+                         QLatin1String(".dll"),  QLatin1String(".o"),
+                         QLatin1String(".bin")})
+            if (n.endsWith(ext, Qt::CaseInsensitive))
+            {
+                n.chop(ext.size());
+                stripped = true;
+                break;
+            }
+    }
     return n;
 }
 
@@ -77,6 +94,12 @@ Ref<BinaryView> BifrostDiffView::findBvByName(const QString& name) const
     auto score = [&](Ref<BinaryView> bv) -> int {
         if (!bv) return 0;
         if (normalizeName(bvDisplayName(bv)) != target) return 0;
+        // A view whose FileContext is no longer open can never produce a pane —
+        // makeSplitPane bails on exactly that — so it must never win. This is
+        // what keeps the immortal singleton's stale leftData/rightData (which
+        // outlive their FileContext, since ownership runs FileContext→BinaryView
+        // and never the reverse) from shadowing the live, tab-backed view.
+        if (!fileContextForBv(bv)) return 0;
         return (bv->GetTypeName() == "Raw") ? 1 : 2;
     };
 
@@ -332,12 +355,34 @@ void BifrostDiffView::showEvent(QShowEvent* event)
     // hands the sidebar and panes to the one in front.
     registerActive();
     BifrostPaneState::instance().notifyDiffChanged();
+
+    // A pane that failed to build has no other way back: removing the toolbar
+    // deleted reloadPanes(), and the retry chain never restarts on its own.
+    // Bringing the tab to the front re-arms the budget, so opening the missing
+    // binary by hand and switching back now recovers. The auto-open latches are
+    // deliberately NOT reset — re-opening on every tab switch would be noise,
+    // and a manual open is already visible to initPanes.
+    const bool stuck = (!m_leftFrame  && !m_leftBvName.isEmpty())
+                    || (!m_rightFrame && !m_rightBvName.isEmpty());
+    if (stuck && !m_retryPending)
+    {
+        m_resolveAttempts = 0;
+        initPanes();
+    }
 }
 
 // ── Deferred pane initialisation ──────────────────────────────────────────────
 
 void BifrostDiffView::initPanes()
 {
+    // Un-latch a resolved-but-unusable view before re-resolving. Without this a
+    // BinaryView whose FileContext has closed stays latched forever, so every
+    // retry re-runs makeSplitPane on it and fails identically. Only done for a
+    // side with no frame — a built pane's BinaryView is still in use by the
+    // navigation callbacks registerActive() installed.
+    if (!m_leftFrame  && m_leftBv  && !fileContextForBv(m_leftBv))  m_leftBv  = nullptr;
+    if (!m_rightFrame && m_rightBv && !fileContextForBv(m_rightBv)) m_rightBv = nullptr;
+
     if (!m_leftBv  && !m_leftBvName.isEmpty())  m_leftBv  = findBvByName(m_leftBvName);
     if (!m_rightBv && !m_rightBvName.isEmpty()) m_rightBv = findBvByName(m_rightBvName);
 
@@ -376,7 +421,8 @@ void BifrostDiffView::initPanes()
         {
             auto* ph = new QLabel(
                 QString("Opening %1 from the project…\n\n"
-                        "If this persists, open it manually and click Reload.")
+                        "If this persists, open %1 yourself, then switch away "
+                        "from this tab and back.")
                     .arg(bvName.isEmpty() ? "(unknown)" : bvName),
                 m_frameSplit);
             ph->setAlignment(Qt::AlignCenter);
@@ -418,18 +464,23 @@ void BifrostDiffView::ensureBinariesOpen()
 {
     constexpr int kMaxResolveAttempts = 20;   // ~14s at 700ms
 
-    bool leftMissing  = !m_leftBv  && !m_leftBvName.isEmpty();
-    bool rightMissing = !m_rightBv && !m_rightBvName.isEmpty();
+    // Gate on whether the PANE was built, not on whether the name resolved to a
+    // BinaryView. A resolved view with no open FileContext yields a placeholder
+    // with no frame; treating that as "done" is what left one side stuck
+    // forever, with the auto-open never attempted and no retry ever armed.
+    bool leftMissing  = !m_leftFrame  && !m_leftBvName.isEmpty();
+    bool rightMissing = !m_rightFrame && !m_rightBvName.isEmpty();
     if (!leftMissing && !rightMissing)
-        return;   // both resolved — done
+        return;   // both panes built — done
 
     UIContext* ctx = UIContext::activeContext();
     Ref<Project> project = ctx ? ctx->getProject() : nullptr;
 
-    // Kick the async open(s) exactly once.
-    if (ctx && project && project->IsOpen() && !m_autoOpenTried)
+    // Kick the async open once PER SIDE. A single shared latch meant whichever
+    // side was missing first consumed the only attempt, so the other side was
+    // never opened even when it later turned out to be missing too.
+    if (ctx && project && project->IsOpen())
     {
-        m_autoOpenTried = true;
         auto openMatch = [&](const QString& name) {
             const QString target = normalizeName(name);
             for (auto& pfile : project->GetFiles())
@@ -438,16 +489,23 @@ void BifrostDiffView::ensureBinariesOpen()
                     ctx->openProjectFile(pfile);
                     return;
                 }
+            // Silently opening nothing here used to be indistinguishable from a
+            // slow open, and the pane just sat on the placeholder forever.
+            LogWarn("Bifrost: no project file matches \"%s\"; its pane cannot be opened",
+                    qPrintable(name));
         };
-        if (leftMissing)  openMatch(m_leftBvName);
-        if (rightMissing) openMatch(m_rightBvName);
+        if (leftMissing  && !m_autoOpenTriedLeft)  { m_autoOpenTriedLeft  = true; openMatch(m_leftBvName);  }
+        if (rightMissing && !m_autoOpenTriedRight) { m_autoOpenTriedRight = true; openMatch(m_rightBvName); }
     }
 
     // Retry building the still-missing panes once the async open completes.
-    if (m_resolveAttempts < kMaxResolveAttempts)
+    // m_retryPending keeps concurrent chains from forking (showEvent can also
+    // start one), which would burn the attempt budget several times over.
+    if (!m_retryPending && m_resolveAttempts < kMaxResolveAttempts)
     {
         ++m_resolveAttempts;
-        QTimer::singleShot(700, this, [this]() { initPanes(); });
+        m_retryPending = true;
+        QTimer::singleShot(700, this, [this]() { m_retryPending = false; initPanes(); });
     }
 }
 

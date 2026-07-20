@@ -60,14 +60,13 @@ BifrostDiffDialog::BifrostDiffDialog(QWidget* parent)
         int ri = m_rightCombo->currentIndex();
         if (li >= 0 && ri >= 0 && li < (int)m_projectFiles.size() && ri < (int)m_projectFiles.size())
         {
-            QString ln = QString::fromStdString(m_projectFiles[li]->GetName());
-            QString rn = QString::fromStdString(m_projectFiles[ri]->GetName());
-            // Strip common extensions for brevity
-            for (auto& ext : {".bndb", ".dylib", ".so", ".exe", ".dll"})
-            {
-                ln.remove(ext, Qt::CaseInsensitive);
-                rn.remove(ext, Qt::CaseInsensitive);
-            }
+            // Strip extensions for brevity, sharing the diff view's helper so
+            // the two cannot drift apart (it strips trailing extensions only —
+            // removing them anywhere turned "a.out" into "aut").
+            QString ln = BifrostDiffView::normalizeName(
+                QString::fromStdString(m_projectFiles[li]->GetName()));
+            QString rn = BifrostDiffView::normalizeName(
+                QString::fromStdString(m_projectFiles[ri]->GetName()));
             m_diffNameEdit->setPlaceholderText(ln + "-vs-" + rn);
         }
     };

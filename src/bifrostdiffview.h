@@ -78,10 +78,14 @@ class BifrostDiffView : public QWidget, public View
     BinaryNinja::Ref<BinaryNinja::Function> m_prevLeftFunc;
     BinaryNinja::Ref<BinaryNinja::Function> m_prevRightFunc;
 
-    // Auto-open-from-project state: openProjectFile is async, so we open the
-    // missing binaries once and retry building the panes on a bounded timer.
-    bool m_autoOpenTried = false;
+    // Auto-open-from-project state: openProjectFile is async, so we open each
+    // missing binary once and retry building the panes on a bounded timer.
+    // The latch is per side — a shared one let whichever side was missing first
+    // consume the only attempt, stranding the other.
+    bool m_autoOpenTriedLeft  = false;
+    bool m_autoOpenTriedRight = false;
     int  m_resolveAttempts = 0;
+    bool m_retryPending = false;
 
     // Instruction addresses currently highlighted, so they can be cleared on
     // the next navigation without scanning the whole function.
@@ -110,7 +114,6 @@ class BifrostDiffView : public QWidget, public View
     // Open any still-missing binaries from the project (async) and schedule a
     // bounded retry of initPanes so their panes appear once loaded.
     void ensureBinariesOpen();
-    static QString normalizeName(QString n);
 
 public:
     // `diffName` is the diff's stored name (not the tab title) — it is the name
@@ -140,6 +143,11 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 public:
+
+    // Strip trailing binary/database extensions ("foo.dylib.bndb" → "foo") so
+    // names from different sources compare equal. Shared with the Run Diff
+    // dialog so the two cannot drift apart.
+    static QString normalizeName(QString n);
 
     static bool isSemanticToken(BNInstructionTextTokenType t);
     void clearBlockHighlights(BinaryNinja::Ref<BinaryNinja::Function> func);
