@@ -68,9 +68,10 @@ BifrostContainer::BifrostContainer(QWidget* parent, Ref<BinaryView> data, ViewFr
 BifrostContainer::~BifrostContainer()
 {
     // Release our callbacks (and, if we're the active driver, our BinaryView
-    // refs) from the singleton before BN tears down its core objects. Both are
+    // refs) from the singleton while BN's core is still alive. Both are
     // owner-guarded so a destroyed non-active container can't wipe an active
-    // diff view's state — prevents use-after-free during static cleanup.
+    // diff view's state. (Refs still held at process exit are handled by the
+    // singleton being deliberately leaked — see BifrostPaneState::instance.)
     auto& s = BifrostPaneState::instance();
     if (s.navOwner == this)
         s.set(nullptr, nullptr);

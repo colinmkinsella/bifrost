@@ -96,8 +96,15 @@ struct BifrostPaneState
 
     static BifrostPaneState& instance()
     {
-        static BifrostPaneState s;
-        return s;
+        // Deliberately leaked, never destroyed. This singleton holds Binary
+        // Ninja Ref<> objects (leftData/rightData/activeDiffData); a static
+        // destructor would release them from __cxa_finalize at process exit —
+        // i.e. AFTER BN's core has torn itself down — and BNFreeBinaryView
+        // then aborts inside an already-finalized core subsystem. Letting the
+        // OS reclaim this at exit is the standard fix for the static
+        // destruction order problem across dynamic libraries.
+        static BifrostPaneState* s = new BifrostPaneState();
+        return *s;
     }
 
     void set(BinaryNinja::Ref<BinaryNinja::BinaryView> left,
